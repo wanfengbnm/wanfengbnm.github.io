@@ -3,7 +3,7 @@
 layout: home
 
 hero:
-  name: "123"
+  name: <font color="blue">"123"</font>
   text: "123"
   tagline: My great project tagline
   actions:
