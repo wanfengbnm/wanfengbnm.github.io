@@ -4,7 +4,7 @@ layout: home
 
 hero:
   name: <font color="blue">"123"</font>
-  text: "123"
+  text: <font color="red">"123"</font>
   tagline: My great project tagline
   actions:
     - theme: brand
