@@ -2,21 +2,21 @@ import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: "123",
-  description: "123",
+  title: "生活记录",
+  description: "生活记录",
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
-      { text: 'Examples', link: '/markdown-examples' }
+      { text: '记录设置', link: '/new1' }
     ],
 
     sidebar: [
       {
-        text: 'Examples',
+        text: '个人设置',
         items: [
-          { text: 'Markdown Examples', link: '/markdown-examples' },
-          { text: 'Runtime API Examples', link: '/api-examples' }
+          { text: '信息设置', link: '/new1' },
+          { text: '问题', link: '/new2' }
         ]
       }
     ],
