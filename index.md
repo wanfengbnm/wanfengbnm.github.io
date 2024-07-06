@@ -8,18 +8,22 @@ hero:
   tagline: The great monments of our life
   actions:
     - theme: brand
-      text: Markdown Examples
-      link: /markdown-examples
+      text: 信息设置
+      link: /new1
     - theme: alt
-      text: API Examples
-      link: /api-examples
+      text: 问题
+      link: /new2
 features:
   - title: 照片
-    details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+    details: pictures 
   - title: 文字
-    details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+    details: words
   - title: 时间
-    details: Lorem ipsum dolor sit amet, consectetur adipiscing elit
+    details: time line
 ---
+## 个人图片展示:
+<div style="display: flex; justify-content: center;">
+<img src="/test1.jpg" alt="picture" style="border-radius: 50%; height:300px; width:500px"/>
+<img src="/test2.jpg" alt="picture" style="border-radius: 50%; height:300px; width:500px"/>
+</div>
 
-<img alt="src=&quot;/test1.jpg&quot; width=300 height=500" height="300" src="/test1.jpg" width="500"/>
