@@ -8,7 +8,8 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
-      { text: '记录设置', link: '/new1' }
+      { text: '记录设置', link: '/new1' },
+      { text: '更新日志', link: '/changelog' }
     ],
 
     sidebar: [
@@ -20,7 +21,6 @@ export default defineConfig({
         ]
       }
     ],
-
     socialLinks: [
       { icon: 'github', link: 'https://github.com/vuejs/vitepress' }
     ]
