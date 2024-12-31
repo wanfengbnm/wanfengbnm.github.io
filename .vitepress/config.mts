@@ -8,16 +8,15 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },
-      { text: '记录设置', link: '/new1' },
+      { text: '任务日志', link: '/new1' },
       { text: '更新日志', link: '/changelog' }
     ],
 
     sidebar: [
       {
-        text: '个人设置',
         items: [
-          { text: '信息设置', link: '/new1' },
-          { text: '问题', link: '/new2' }
+          { text: '任务日志', link: '/new1' },
+          { text: '问题更改', link: '/new2' }
         ]
       }
     ],
