@@ -3,18 +3,18 @@
 layout: home
 
 hero:
-  name: <font color="blue">生活记录</font>
+  name: <font color="blue">个人生活日志</font>
 
-  tagline: The great monments of our life
+  tagline: The Schedule Of Life
   actions:
     - theme: brand
-      text: 日志查看
+      text: 具体日志查看
       link: /new1
     - theme: alt
-      text: 问题查看
+      text: 日常问题查看
       link: /new2
     - theme: table
-      text: 图片查看
+      text: 文档研究查看
       link: /new3
 ---
 ##
