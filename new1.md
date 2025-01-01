@@ -2,7 +2,7 @@
 Common Schedule:PY learning and M/E learning
 |  任务时间  | 任务的具体详情 | 任务完成情况(Y/N/W) | 额外补充任务 |
 |----------|---------|----|----|
-| 2024.1.1 |Common Schedule|  W  |    |
+| 2024.1.1 |Common Schedule|  Y  | 英卷2024 |
 | 2024.1.2 |Common Schedule|  W  |    |
 | 2024.1.3 |Common Schedule|  W  |    |
 | 2024.1.4 |Common Schedule|  W  |    |
