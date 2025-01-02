@@ -25,7 +25,7 @@
 <br>downtime 休息；
 <br>fatigue 劳累；(burnout 近似义)
 <br>irritability 易怒；
-----2024.1.2 词汇----
+<br>----2024.1.2 词汇----
 <br>whereas 然而，但是；
 <br>gap 间隙，差距；
 <br>spoiled 惯坏的，宠坏的；
