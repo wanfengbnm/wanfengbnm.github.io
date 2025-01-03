@@ -1,7 +1,7 @@
 # 问题情况
 <details>
 <summary>展开查看有关数学知识的问题</summary>
-----2024.1.2 ----
+<br>----2024.1.2 ----
 <br>公式：
 <br>x-sinx~1/6*x^3
 <br>x-tanx~-1/3*x^3
@@ -11,6 +11,9 @@
 <br>内容：
 <br>第一间断点：左右极限均存在，相同为可去，不同为跳跃；
 <br>第二间断点：左右极限有一不存在为无穷值；
+<br>----2024.1.3----
+<br>公式：泰勒公式展开式(常见)；
+<br>内容：等价无穷小，高阶无穷小，低阶无穷小；
 </details>
 <details>
 <summary>展开查看有关英语知识的问题</summary>
@@ -67,4 +70,20 @@
 <br>tech giant 科技巨头；
 <br>conceive 构思，想象；
 <br>manufacturing 制造业；
+<br>----2025.1.3 词汇----
+<br>bring about 引起，导致；
+<br>workload 工作量，工作负担；
+<br>enhance 增强，提高，增进；
+<br>impractical 不切实际的，不现实的，不明智的；
+<br>incur 招致，引起；
+<br>expenditure 支出，开支，费用；
+<br>distribution 分发，分布，分配；
+<br>prospect 前景，前途，展望；
+<br>with regard of 关于，就什么而言；
+<br>collaboration 合作，协作；
+<br>guard against 防范，提防；
 </details>
+<br>·····图一如下:
+<div style="display:flex;justify-content: left">
+<img src="/pic1.jpg" alt="图一" style="border-radius: 25px;height:300px;width:500px"/>
+</div>

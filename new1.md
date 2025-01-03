@@ -4,7 +4,7 @@ Common Schedule:PY learning and M/E learning
 |----------|---------|----|----|
 | 2024.1.1 |Common Schedule|  Y  | 英卷2024 |
 | 2024.1.2 |Common Schedule|  Y  | Math   |
-| 2024.1.3 |Common Schedule|  W  |    |
+| 2024.1.3 |Common Schedule|  Y  | 专业课   |
 | 2024.1.4 |Common Schedule|  W  |    |
 | 2024.1.5 |Common Schedule|  W  |    |
 | 2024.1.6 |Common Schedule|  W  |    |
