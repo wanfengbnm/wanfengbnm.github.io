@@ -82,8 +82,46 @@
 <br>with regard of 关于，就什么而言；
 <br>collaboration 合作，协作；
 <br>guard against 防范，提防；
+<br>----2024.1.4 词汇----
+<br>Confederation 联合会
+<br>forestry 林学，林业
+<br>body 团体，组织
+<br>call for 号召，呼吁
+<br>timber 木材
+<br>stable 稳定的，稳固的
+<br>home-grown 本地的
+<br>net importer 净进口国
+<br>incentive 奖励，刺激
+<br>chief executive 首席执行官
+<br>take responsibility for doing sth 承担做某事的责任
+<br>domestic 国内的
+<br>fluctuating 波动的，变动的
+<br>ideal 理想的，完美的
+<br>certify 证实，证明
+<br>sustainably 可持续的
+<br>outdated 过时的，陈旧的
+<br>perception 看法，见解
+<br>decimation 大面积的破坏
+<br>encompass 包含
+<br>significant 显著的，重大的
+<br>hesitation 犹豫，踌躇
+<br>deliver 提供，兑现
+<br>rural economy 乡村经济
+<br>contribute 贡献，增进
+<br>net zero 净零排放
+<br>rewild 重新野化，使恢复自然地貌
+<br>solely 仅仅，只
+<br>biodiversity 生物多样性
+<br>be of critical importance 至关重要的
+<br>secure 稳固的，可靠的
+<br>manufacturing 制造业
+<br>ambition 雄心壮志，野心
+<br>on the ground 实际上，实际情况
+<br>impetus 推进，促进
+<br>aspiration 抱负，志向
+<br>state 陈述，声明
 </details>
-<br>·····图一如下:
+<br>·图一如下:
 <div style="display:flex;justify-content: left">
 <img src="/pic1.jpg" alt="图一" style="border-radius: 25px;height:300px;width:500px"/>
 </div>
