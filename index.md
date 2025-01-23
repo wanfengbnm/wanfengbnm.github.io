@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: wanfengbnm生活日志
+  name: Wanfengbnm生活日志
 
   tagline: The Schedule Of Life
   actions:
