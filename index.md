@@ -3,18 +3,18 @@
 layout: home
 
 hero:
-  name: <font color="blue">个人生活日志</font>
+  name: wanfengbnm生活日志
 
   tagline: The Schedule Of Life
   actions:
     - theme: brand
-      text: 具体日志查看
+      text: 具体日志
       link: /new1
     - theme: alt
-      text: 日常问题查看
+      text: 日常问题
       link: /new2
-    - theme: table
-      text: 文档研究查看
+    - theme: alt
+      text: 文档研究
       link: /new3
 ---
 ##
