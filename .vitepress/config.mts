@@ -2,12 +2,73 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   lang: 'zh-CN',
-  title: "wanfengbnm生活日志",
-  description: "wanfengbnm生活日志",
+  title: "Wanfengbnm生活日志",
+  description: "Wanfengbnm生活日志",
+  markdown: {
+    lineNumbers: true,
+    container: {
+      tipLabel: '提示',
+      warningLabel: '警告',
+      dangerLabel: '危险',
+      infoLabel: '信息',
+      detailsLabel: '详细信息'
+    }
+  },
   sitemap: {
     hostname: 'https://wanfengbnm.cn/'
   },
   themeConfig: {
+    i18nRouting: false,
+    darkModeSwitchLabel: '切换深色或浅色模式',
+    lightModeSwitchTitle: '切换至浅色模式',
+    darkModeSwitchTitle: '切换至深色模式',
+    sidebarMenuLabel: '目录',
+    returnToTopLabel: '回到顶部',
+    externalLinkIcon: false,
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/wanfengbnm' }
+    ],
+    docFooter: {
+      prev: '上一篇',
+      next: '下一篇'
+    },
+    search: {
+      provider: 'local',
+      options: {
+        locales: {
+          root: {
+            translations: {
+              button: {
+                buttonText: '搜索文档',
+                buttonAriaLabel: '搜索文档',
+              },
+              modal: {
+                displayDetails: '显示文章的详细内容',
+                resetButtonTitle: '清除内容',
+                backButtonTitle: '返回',
+                noResultsText: '没有找到',
+                footer: {
+                  selectText: '选择',
+                  selectKeyAriaLabel: '选择',
+                  navigateText: '切换',
+                  navigateUpKeyAriaLabel: '向上',
+                  navigateDownKeyAriaLabel: '向下',
+                  closeText: '关闭',
+                  closeKeyAriaLabel: '关闭',
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    notFound: {
+      title: '页面未找到',
+      quote: '抱歉，没有找到您需要的页面',
+      linkLabel: '回到主页',
+      linkText: '回到主页',
+      code: '404',
+    },
     nav: [
       { text: '主页', link: '/' },
       { text: '任务日志', link: '/TaskLog/' },
@@ -15,8 +76,5 @@ export default defineConfig({
       { text: '文档研究', link: '/DocumentResearch/' },
       { text: '更新日志', link: '/CHANGELOG/' }
     ],
-    socialLinks: [
-      { icon: 'github', link: 'https://github.com/wanfengbnm' }
-    ]
   }
 })
