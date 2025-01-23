@@ -1,5 +1,4 @@
 ---
-# https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
 hero:
@@ -17,7 +16,6 @@ hero:
       text: 文档研究
       link: /new3
 ---
-##
 
 <div style="display: flex; justify-content: center;">
 <img src="/test5.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px"/>
