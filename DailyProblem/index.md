@@ -1,7 +1,3 @@
 # 日常问题
 
-<script setup>
-import index from './src/index.vue'
-</script>
-
-<index />
+> 使用左侧的侧边栏定位内容
