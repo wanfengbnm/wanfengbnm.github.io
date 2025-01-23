@@ -4,6 +4,11 @@ export default defineConfig({
   lang: 'zh-CN',
   title: "Wanfengbnm生活日志",
   description: "Wanfengbnm生活日志",
+  // head: [
+  //   ['link',
+  //     { rel: 'icon', href: '/logo.ico' }
+  //   ],
+  // ],
   markdown: {
     lineNumbers: true,
     container: {
@@ -14,10 +19,16 @@ export default defineConfig({
       detailsLabel: '详细信息'
     }
   },
+  metaChunk: true,
   sitemap: {
     hostname: 'https://wanfengbnm.cn/'
   },
   themeConfig: {
+    //logo: '/logo.ico',
+    aside: true,
+    outline: {
+      label: "此篇目录",
+    },
     i18nRouting: false,
     darkModeSwitchLabel: '切换深色或浅色模式',
     lightModeSwitchTitle: '切换至浅色模式',
@@ -104,7 +115,7 @@ export default defineConfig({
       ],
     },
     footer: {
-      message: '本网站以 <a href="/Apache-License-2.0.txt" target="_blank">Apache License 2.0</a> 的条款发布。',
+      message: '本网站以<a href="/Apache-License-2.0.txt" target="_blank">Apache License 2.0</a>的条款发布。',
       copyright: 'Copyright © 2024-2025 <a href="https://github.com/wanfengbnm" target="_blank">wanfengbnm</a>. 保留所有权利。'
     },
   }
