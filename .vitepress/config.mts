@@ -71,11 +71,38 @@ export default defineConfig({
     },
     nav: [
       { text: '主页', link: '/' },
-      { text: '任务日志', link: '/TaskLog/' },
-      { text: '日常问题', link: '/DailyProblem/' },
-      { text: '文档研究', link: '/DocumentResearch/' },
-      { text: '更新日志', link: '/CHANGELOG/' }
+      {
+        text: '任务日志',
+        activeMatch: '/TaskLog/',
+        link: '/TaskLog/'
+      },
+      {
+        text: '日常问题',
+        activeMatch: '/DailyProblem/',
+        link: '/DailyProblem/'
+      },
+      {
+        text: '文档研究',
+        activeMatch: '/DocumentResearch/',
+        link: '/DocumentResearch/'
+      },
+      {
+        text: '更新日志',
+        activeMatch: '/CHANGELOG/',
+        link: '/CHANGELOG/'
+      }
     ],
+    sidebar: {
+      '/DailyProblem/': [
+        {
+          text: '日常问题',
+          items: [
+            { text: '前言', link: '/DailyProblem/' },
+            { text: '数学知识', link: '/DailyProblem/Math' },
+            { text: '英语知识', link: '/DailyProblem/English' }]
+        }
+      ],
+    },
     footer: {
       message: '本网站以 <a href="/Apache-License-2.0.txt" target="_blank">Apache License 2.0</a> 的条款发布。',
       copyright: 'Copyright © 2024-2025 <a href="https://github.com/wanfengbnm" target="_blank">wanfengbnm</a>. 保留所有权利。'
