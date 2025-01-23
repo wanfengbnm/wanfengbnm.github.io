@@ -17,14 +17,8 @@ hero:
       link: /new3
 ---
 
-<div style="display: flex; justify-content: center;">
-<img src="/test5.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px"/>
-<img src="/test2.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px"/>
+<script setup>
+import index from '/src/index.vue'
+</script>
 
-</div>
-<div style="display: flex; justify-content: center;">
-<img src="/test3.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px"/>
-<img src="/test4.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px"/>
-
-</div>
-
+<index />
