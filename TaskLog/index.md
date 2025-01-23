@@ -1,0 +1,59 @@
+# 任务日志
+Common Schedule:PY learning and M/E learning
+| 任务时间  | 任务的具体详情  | 任务完成情况(Y/N/W) | 额外补充任务 |
+| --------- | --------------- | ------------------- | ------------ |
+| 2024.1.1  | Common Schedule | Y                   | 英卷2024     |
+| 2024.1.2  | Common Schedule | Y                   | Math         |
+| 2024.1.3  | Common Schedule | Y                   | 专业课       |
+| 2024.1.4  | Common Schedule | W                   |              |
+| 2024.1.5  | Common Schedule | W                   |              |
+| 2024.1.6  | Common Schedule | W                   |              |
+| 2024.1.7  | Common Schedule | W                   |              |
+| 2024.1.8  | Common Schedule | W                   |              |
+| 2024.1.9  | Common Schedule | W                   |              |
+| 2024.1.10 | Common Schedule | W                   |              |
+| 2024.1.11 | Common Schedule | W                   |              |
+| 2024.1.12 | Common Schedule | W                   |              |
+| 2024.1.13 | Common Schedule | W                   |              |
+| 2024.1.14 | Common Schedule | W                   |              |
+| 2024.1.15 | Common Schedule | W                   |              |
+| 2024.1.16 | Common Schedule | W                   |              |
+| 2024.1.17 | Common Schedule | W                   |              |
+| 2024.1.18 | Common Schedule | W                   |              |
+| 2024.1.19 | Common Schedule | W                   |              |
+| 2024.1.20 | Common Schedule | W                   |              |
+| 2024.1.21 | Common Schedule | W                   |              |
+| 2024.1.22 | Common Schedule | W                   |              |
+| 2024.1.23 | Common Schedule | W                   |              |
+| 2024.1.24 | Common Schedule | W                   |              |
+| 2024.1.25 | Common Schedule | W                   |              |
+| 2024.1.26 | Common Schedule | W                   |              |
+| 2024.1.27 | Common Schedule | W                   |              |
+| 2024.1.28 | Common Schedule | W                   |              |
+| 2024.1.29 | Common Schedule | W                   |              |
+| 2024.1.30 | Common Schedule | W                   |              |
+| 2024.1.31 | Common Schedule | W                   |              |
+| 2024.2.1  | Common Schedule | W                   |              |
+| 2024.2.2  | Common Schedule | W                   |              |
+| 2024.2.3  | Common Schedule | W                   |              |
+| 2024.2.4  | Common Schedule | W                   |              |
+| 2024.2.5  | Common Schedule | W                   |              |
+| 2024.2.6  | Common Schedule | W                   |              |
+| 2024.2.7  | Common Schedule | W                   |              |
+| 2024.2.8  | Common Schedule | W                   |              |
+| 2024.2.9  | Common Schedule | W                   |              |
+| 2024.2.10 | Common Schedule | W                   |              |
+| 2024.2.11 | Common Schedule | W                   |              |
+| 2024.2.12 | Common Schedule | W                   |              |
+| 2024.2.13 | Common Schedule | W                   |              |
+| 2024.2.14 | Common Schedule | W                   |              |
+| 2024.2.15 | Common Schedule | W                   |              |
+| 2024.2.16 | Common Schedule | W                   |              |
+| 2024.2.17 | Common Schedule | W                   |              |
+| 2024.2.18 | Common Schedule | W                   |              |
+| 2024.2.19 | Common Schedule | W                   |              |
+| 2024.2.20 | Common Schedule | W                   |              |
+| 2024.2.21 | Common Schedule | W                   |              |
+| 2024.2.22 | Common Schedule | W                   |              |
+| 2024.2.23 | Common Schedule | W                   |              |
+| 2024.2.24 | Common Schedule | W                   |              |
