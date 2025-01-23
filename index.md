@@ -11,7 +11,7 @@ hero:
       link: /TaskLog/
     - theme: alt
       text: 日常问题
-      link: /new2
+      link: /DailyProblem/
     - theme: alt
       text: 文档研究
       link: /new3
