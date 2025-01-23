@@ -5,14 +5,12 @@
     <div class="divider"></div>
     <br>
     <div style="display: flex; justify-content: center;">
-        <img src="/img/test5.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px" />
-        <img src="/img/test2.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px" />
-
+        <img src="/img/test5.jpg" class="picture" />
+        <img src="/img/test2.jpg" class="picture" />
     </div>
     <div style="display: flex; justify-content: center;">
-        <img src="/img/test3.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px" />
-        <img src="/img/test4.jpg" alt="picture" style="border-radius: 25px; height:300px; width:500px" />
-
+        <img src="/img/test3.jpg" class="picture" />
+        <img src="/img/test4.jpg" class="picture" />
     </div>
 </template>
 
@@ -22,5 +20,11 @@
     width: 300px;
     height: 1px;
     background-color: var(--vp-c-divider);
+}
+
+img.picture {
+    border-radius: 25px;
+    height: 300px;
+    width: 500px;
 }
 </style>
