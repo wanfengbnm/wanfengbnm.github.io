@@ -4,11 +4,11 @@
 <template>
     <div class="divider"></div>
     <br>
-    <div style="display: flex; justify-content: center;">
+    <div class="center">
         <img src="/img/test5.jpg" class="picture" />
         <img src="/img/test2.jpg" class="picture" />
     </div>
-    <div style="display: flex; justify-content: center;">
+    <div class="center">
         <img src="/img/test3.jpg" class="picture" />
         <img src="/img/test4.jpg" class="picture" />
     </div>
@@ -20,6 +20,11 @@
     width: 300px;
     height: 1px;
     background-color: var(--vp-c-divider);
+}
+
+.center {
+    display: flex;
+    justify-content: center;
 }
 
 img.picture {
