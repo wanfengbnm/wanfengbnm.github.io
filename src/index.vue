@@ -1,7 +1,6 @@
 <script lang="ts" setup>
 import { ref } from 'vue';
 
-// 定义图片数组，方便管理和扩展
 const images = ref([
     '/img/test1.jpg',
     '/img/test2.jpg',
@@ -15,7 +14,6 @@ const images = ref([
     <div class="divider"></div>
     <br>
     <div class="image-container">
-        <!-- 循环渲染图片 -->
         <img v-for="(image, index) in images" :key="index" :src="image" class="picture" loading="lazy" alt="示例图片" />
     </div>
 </template>
@@ -53,7 +51,6 @@ img.picture:hover {
     box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2);
 }
 
-/* 媒体查询，进一步优化小屏设备展示 */
 @media (max-width: 768px) {
     .divider {
         width: 90%;
