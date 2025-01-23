@@ -76,5 +76,9 @@ export default defineConfig({
       { text: '文档研究', link: '/DocumentResearch/' },
       { text: '更新日志', link: '/CHANGELOG/' }
     ],
+    footer: {
+      message: '本网站以 <a href="/Apache-License-2.0.txt" target="_blank">Apache License 2.0</a> 的条款发布。',
+      copyright: 'Copyright © 2024-2025 <a href="https://github.com/wanfengbnm" target="_blank">wanfengbnm</a>. 保留所有权利。'
+    },
   }
 })
