@@ -23,37 +23,48 @@ const images = ref([
 <style lang="css" scoped>
 .divider {
     margin: 24px auto 18px;
-    width: 300px;
+    width: 80%;
     height: 1px;
-    background-color: var(--vp-c-divider);
+    background-color: var(--vp-c-divider, #ccc);
 }
 
 .image-container {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
-    /* 图片之间的间距 */
+    justify-items: center;
+    align-items: center;
+    padding: 16px;
 }
 
 img.picture {
     border-radius: 10px;
-    /* 调小圆角 */
-    max-width: 400px;
-    /* 调整图片最大宽度 */
+    max-width: 100%;
     max-height: 250px;
-    /* 调整图片最大高度 */
     width: auto;
     height: auto;
     object-fit: cover;
-    /* 保持图片比例 */
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
-/* 媒体查询，当屏幕宽度小于 768px 时，即手机屏幕 */
+img.picture:hover {
+    transform: scale(1.05);
+    box-shadow: 0 8px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* 媒体查询，进一步优化小屏设备展示 */
 @media (max-width: 768px) {
+    .divider {
+        width: 90%;
+    }
+
     .image-container {
-        flex-direction: column;
-        align-items: center;
+        gap: 12px;
+    }
+
+    img.picture {
+        max-height: 200px;
     }
 }
 </style>
