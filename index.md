@@ -7,8 +7,8 @@ hero:
   tagline: The Schedule Of Life
   actions:
     - theme: brand
-      text: 具体日志
-      link: /new1
+      text: 任务日志
+      link: /TaskLog/
     - theme: alt
       text: 日常问题
       link: /new2

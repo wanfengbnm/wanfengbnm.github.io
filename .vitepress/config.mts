@@ -6,16 +6,9 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },
-      { text: '任务日志', link: '/new1' },
+      { text: '任务日志', link: '/TaskLog/' },
+      { text: '任务日志', link: '/ConcreteLog/' },
       { text: '更新日志', link: '/CHANGELOG/' }
-    ],
-    sidebar: [
-      {
-        items: [
-          { text: '任务日志', link: '/new1' },
-          { text: '问题更改', link: '/new2' }
-        ]
-      }
     ],
     socialLinks: [
       { icon: 'github', link: 'https://github.com/wanfengbnm' }
