@@ -14,7 +14,7 @@ hero:
       link: /DailyProblem/
     - theme: alt
       text: 文档研究
-      link: /new3
+      link: /DocumentResearch/
 ---
 
 <script setup>
