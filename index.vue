@@ -2,11 +2,11 @@
 import { ref } from 'vue';
 
 const images = ref([
-    '/img/test1.jpg',
-    '/img/test2.jpg',
-    '/img/test3.jpg',
-    '/img/test4.jpg',
-    '/img/test5.jpg',
+    '/img/1.jpg',
+    '/img/2.jpg',
+    '/img/3.jpg',
+    '/img/4.jpg',
+    '/img/5.jpg',
 ]);
 </script>
 
@@ -14,7 +14,9 @@ const images = ref([
     <div class="divider"></div>
     <br>
     <div class="image-container">
-        <img v-for="(image, index) in images" :key="index" :src="image" class="picture" loading="lazy" alt="示例图片" />
+        <a v-for="(image, index) in images" :key="index" :href="image" target="_blank" rel="noopener noreferrer">
+            <img :src="image" class="picture" loading="lazy" alt="示例图片" />
+        </a>
     </div>
 </template>
 
