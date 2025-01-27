@@ -4,11 +4,11 @@ export default defineConfig({
   lang: 'zh-CN',
   title: "Wanfengbnm生活日志",
   description: "Wanfengbnm生活日志",
-  // head: [
-  //   ['link',
-  //     { rel: 'icon', href: '/logo.ico' }
-  //   ],
-  // ],
+  head: [
+    ['link',
+      { rel: 'icon', href: '/logo.ico' }
+    ],
+  ],
   markdown: {
     lineNumbers: true,
     container: {
@@ -24,7 +24,7 @@ export default defineConfig({
     hostname: 'https://wanfengbnm.cn/'
   },
   themeConfig: {
-    //logo: '/logo.ico',
+    logo: '/logo.ico',
     aside: true,
     outline: {
       label: "此篇目录",
