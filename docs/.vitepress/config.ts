@@ -84,7 +84,6 @@ export default defineConfig({
       { text: '主页', link: '/' },
       {
         text: 'APP后端管理',
-        activeMatch: '/TaskLog/',
         link: '/TaskLog/'
       },
       {
