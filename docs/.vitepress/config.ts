@@ -83,7 +83,7 @@ export default defineConfig({
     nav: [
       { text: '主页', link: '/' },
       {
-        text: '任务日志',
+        text: 'APP后端管理',
         activeMatch: '/TaskLog/',
         link: '/TaskLog/'
       },
@@ -110,7 +110,7 @@ export default defineConfig({
           items: [
             { text: '前言', link: '/DailyProblem/' },
             { text: '数学知识', link: '/DailyProblem/Math' },
-            { text: '英语知识', link: '/DailyProblem/English' }]
+            { text: '其他', link: '/DailyProblem/English' }]
         }
       ],
     },
