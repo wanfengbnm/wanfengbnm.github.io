@@ -1,1 +1,1 @@
-pnpm run docs:dev
+npm run docs:dev
