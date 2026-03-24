@@ -1,0 +1,8 @@
+/* 🚨 关闭所有页面过渡动画 */
+.VPContent,
+.VPDoc,
+.VPPage {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+}
