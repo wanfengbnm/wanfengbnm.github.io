@@ -4,6 +4,16 @@ export default defineConfig({
   lang: 'zh-CN',
   title: "Wanfengbnm生活日志",
   description: "Wanfengbnm生活日志",
+  vite: {
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+      },
+    },
+  },
   head: [
     ['link',
       { rel: 'icon', href: '/logo.ico' }
@@ -108,7 +118,6 @@ export default defineConfig({
           text: '日常问题',
           items: [
             { text: '前言', link: '/DailyProblem/' },
-            { text: '数学知识', link: '/DailyProblem/Math' },
             { text: '其他', link: '/DailyProblem/English' }]
         }
       ],

@@ -85,7 +85,7 @@ const login = () => {
     return
   }
 
-  if (username.value === 'admin' && password.value === '123456') {
+  if (username.value === 'admin' && password.value === 'REMOVED') {
 
     const target = 'http://117.72.77.63:7500/static/#/'
 
@@ -124,10 +124,21 @@ const logout = () => {
 
 <style scoped>
 
+:global(:root) {
+  color-scheme: light dark;
+}
+
 /* 背景 */
 .container {
-  width: 100%;
-  height: 100vh;
+  position: fixed;
+  inset: var(--vp-nav-height, 0px) 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  box-sizing: border-box;
+  z-index: 1;
+  background: radial-gradient(circle at top, var(--vp-c-bg-soft, rgba(0, 0, 0, 0.04)), transparent 60%);
 }
 
 /* 登录框 */
@@ -135,51 +146,58 @@ const logout = () => {
   width: 320px;
   padding: 30px;
   border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  background: var(--vp-c-bg, #fff);
+  color: var(--vp-c-text-1, #1f2328);
+  border: 1px solid var(--vp-c-divider, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 18px 48px rgba(0,0,0,0.16);
+  backdrop-filter: blur(10px);
 }
 
 .login-box h2 {
   text-align: center;
   margin-bottom: 20px;
+  color: var(--vp-c-text-1, #1f2328);
 }
 
 .login-box input {
   width: 100%;
   padding: 10px;
   margin-bottom: 15px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--vp-c-divider, #ddd);
   border-radius: 6px;
+  background: var(--vp-c-bg-soft, #f6f7f9);
+  color: var(--vp-c-text-1, #1f2328);
+  box-sizing: border-box;
+}
+
+.login-box input::placeholder {
+  color: var(--vp-c-text-3, #8c8c8c);
 }
 
 .login-box button {
   width: 100%;
   padding: 10px;
-  background: #409eff;
-  color: #fff;
+  background: var(--vp-c-brand-1, #409eff);
+  color: var(--vp-c-white, #fff);
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 
 .login-box button:hover {
-  background: #66b1ff;
+  background: var(--vp-c-brand-2, #66b1ff);
 }
 
 .error {
-  color: #f56c6c;
+  color: var(--vp-c-danger-1, #f56c6c);
   margin-top: 10px;
   text-align: center;
 }
 
 /* 后台布局 */
 .dashboard {
-  height: 100vh;
+  width: 100%;
+  min-height: calc(100vh - var(--vp-nav-height, 0px));
   display: flex;
   flex-direction: column;
 }

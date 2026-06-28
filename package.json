@@ -5,9 +5,13 @@
   "scripts": {
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "backend:dev": "node server/index.js"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "mssql": "^11.0.1",
+    "express": "^4.21.2",
     "vitepress": "^1.6.4"
   }
 }

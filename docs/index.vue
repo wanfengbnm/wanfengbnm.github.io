@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { ref } from 'vue';
+import SqlServerDiagramPanel from './.vitepress/components/SqlServerDiagramPanel.vue';
 
 const images = ref([
     '/img/1.jpg',
@@ -11,21 +12,31 @@ const images = ref([
 </script>
 
 <template>
-    <div class="divider"></div>
+    <div class="section-divider section-divider--top" aria-hidden="true"></div>
     <br>
     <div class="image-container">
         <a v-for="(image, index) in images" :key="index" :href="image" target="_blank" rel="noopener noreferrer">
             <img :src="image" class="picture" loading="lazy" alt="示例图片" />
         </a>
     </div>
+    <div class="section-divider" aria-hidden="true"></div>
+    <SqlServerDiagramPanel />
 </template>
 
 <style lang="css" scoped>
-.divider {
-    margin: 24px auto 18px;
-    width: 80%;
+.section-divider {
+    margin: 24px auto 0;
+    width: min(1200px, calc(100% - 32px));
     height: 1px;
-    background-color: var(--vp-c-divider, #ccc);
+    background: linear-gradient(90deg, transparent, var(--vp-c-divider, #ccc), transparent);
+}
+
+.section-divider--top {
+    margin-bottom: 18px;
+}
+
+.section-divider:not(.section-divider--top) {
+    margin-top: 48px;
 }
 
 .image-container {
@@ -54,12 +65,12 @@ img.picture:hover {
 }
 
 @media (max-width: 768px) {
-    .divider {
-        width: 90%;
-    }
-
     .image-container {
         gap: 12px;
+    }
+
+    .section-divider {
+        width: calc(100% - 24px);
     }
 
     img.picture {
