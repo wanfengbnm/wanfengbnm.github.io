@@ -35,6 +35,8 @@ jobs:
       run: pnpm install --frozen-lockfile
 
     - name: Build with VitePress
+      env:
+        VITE_SQLSERVER_API_BASE: ${{ vars.VITE_SQLSERVER_API_BASE || 'http://117.72.77.63:3001' }}
       run: pnpm run docs:build
 
     - name: Setup Pages
