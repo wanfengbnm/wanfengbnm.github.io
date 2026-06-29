@@ -192,6 +192,18 @@ const submit = async () => {
   }
 };
 
+const navigateToViz = () => {
+  sessionStorage.setItem('sqlserver_connection', JSON.stringify({
+    server: form.value.server.trim(),
+    port: form.value.port.trim(),
+    database: form.value.database.trim(),
+    username: form.value.username.trim(),
+    password: form.value.password,
+    instanceName: form.value.instanceName.trim(),
+  }));
+  window.location.href = '/DataVisualization/';
+};
+
 const openZoom = () => {
   if (previewSrc.value) {
     isZoomOpen.value = true;
@@ -307,6 +319,17 @@ onBeforeUnmount(() => {
           <p>{{ previewMessage }}</p>
         </div>
       </div>
+    </div>
+
+    <div v-if="previewState === 'ready'" class="sql-viz-entry">
+      <button type="button" class="sql-viz-entry__button" @click="navigateToViz">
+        <span class="sql-viz-entry__icon">📊</span>
+        <span class="sql-viz-entry__text">
+          <strong>更多可视化操作</strong>
+          <small>对数据库表数据进行统计图表分析</small>
+        </span>
+        <span class="sql-viz-entry__arrow">→</span>
+      </button>
     </div>
 
     <div v-if="isZoomOpen" class="sql-lightbox" role="dialog" aria-modal="true" @click.self="closeZoom">
@@ -536,6 +559,60 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 
+.sql-viz-entry {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--vp-c-divider, rgba(0, 0, 0, 0.08));
+}
+
+.sql-viz-entry__button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 20px;
+  border: 2px dashed var(--vp-c-brand-1, #409eff);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--vp-c-brand-soft, rgba(64, 158, 255, 0.1)) 60%, transparent);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.sql-viz-entry__button:hover {
+  background: color-mix(in srgb, var(--vp-c-brand-soft, rgba(64, 158, 255, 0.16)) 80%, transparent);
+  border-color: var(--vp-c-brand-2, #5a9cff);
+  transform: translateY(-2px);
+}
+
+.sql-viz-entry__icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.sql-viz-entry__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.sql-viz-entry__text strong {
+  font-size: 15px;
+  color: var(--vp-c-text-1, #1f2328);
+}
+
+.sql-viz-entry__text small {
+  font-size: 13px;
+  color: var(--vp-c-text-2, #555);
+}
+
+.sql-viz-entry__arrow {
+  font-size: 22px;
+  color: var(--vp-c-brand-1, #409eff);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
 .sql-lightbox {
   position: fixed;
   inset: 0;
@@ -619,6 +696,16 @@ onBeforeUnmount(() => {
 
   .sql-preview__actions {
     justify-content: flex-start;
+  }
+
+  .sql-viz-entry__button {
+    flex-direction: column;
+    text-align: center;
+    gap: 8px;
+  }
+
+  .sql-viz-entry__arrow {
+    display: none;
   }
 }
 </style>
