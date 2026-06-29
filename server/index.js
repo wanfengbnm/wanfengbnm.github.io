@@ -323,6 +323,112 @@ app.post('/api/sqlserver/diagram', async (req, res) => {
   }
 });
 
+app.post('/api/sqlserver/tables-info', async (req, res) => {
+  const { server, port, database, username, password, instanceName } = req.body || {};
+
+  if (!server || !database || !username || !password) {
+    return res.status(400).json({ message: '请提供 server、database、username 和 password。' });
+  }
+
+  const config = buildConnectionConfig({ server, port, database, username, password, instanceName });
+  let pool;
+
+  try {
+    pool = await new mssql.ConnectionPool(config).connect();
+    const schema = await fetchSchema(pool);
+    res.json({ tables: schema.tables });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '数据库连接失败';
+    res.status(500).json({ message: `获取表信息失败：${message}` });
+  } finally {
+    if (pool) {
+      await pool.close().catch(() => {});
+    }
+  }
+});
+
+app.post('/api/sqlserver/chart-data', async (req, res) => {
+  const { server, port, database, username, password, instanceName, tableSchema, tableName, xColumn, yColumn, aggregation } = req.body || {};
+
+  if (!server || !database || !username || !password || !tableSchema || !tableName || !xColumn || !aggregation) {
+    return res.status(400).json({ message: '缺少必要参数。' });
+  }
+
+  const validAggregations = ['COUNT', 'SUM', 'AVG', 'NONE'];
+  if (!validAggregations.includes(aggregation)) {
+    return res.status(400).json({ message: `aggregation 必须是 ${validAggregations.join('、')} 之一。` });
+  }
+
+  if (aggregation !== 'COUNT' && !yColumn) {
+    return res.status(400).json({ message: '非 COUNT 聚合需要提供 yColumn。' });
+  }
+
+  const config = buildConnectionConfig({ server, port, database, username, password, instanceName });
+  let pool;
+
+  try {
+    pool = await new mssql.ConnectionPool(config).connect();
+
+    // 验证表名和列名是否存在（防止 SQL 注入）
+    const columnCheck = await pool.request()
+      .input('schema', mssql.NVarChar, tableSchema)
+      .input('table', mssql.NVarChar, tableName)
+      .query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @table
+      `);
+
+    const validColumns = new Set(columnCheck.recordset.map((r) => r.COLUMN_NAME));
+
+    if (validColumns.size === 0) {
+      return res.status(400).json({ message: `表 ${tableSchema}.${tableName} 不存在或无列。` });
+    }
+
+    if (!validColumns.has(xColumn)) {
+      return res.status(400).json({ message: `列 ${xColumn} 在表 ${tableSchema}.${tableName} 中不存在。` });
+    }
+
+    if (aggregation !== 'COUNT' && !validColumns.has(yColumn)) {
+      return res.status(400).json({ message: `列 ${yColumn} 在表 ${tableSchema}.${tableName} 中不存在。` });
+    }
+
+    const safeSchema = `[${tableSchema}]`;
+    const safeTable = `[${tableName}]`;
+    const safeX = `[${xColumn}]`;
+    const safeY = aggregation !== 'COUNT' ? `[${yColumn}]` : null;
+
+    let query;
+    if (aggregation === 'COUNT') {
+      query = `SELECT ${safeX} AS label, COUNT(*) AS value FROM ${safeSchema}.${safeTable} GROUP BY ${safeX} ORDER BY value DESC`;
+    } else if (aggregation === 'SUM') {
+      query = `SELECT ${safeX} AS label, SUM(${safeY}) AS value FROM ${safeSchema}.${safeTable} GROUP BY ${safeX} ORDER BY value DESC`;
+    } else if (aggregation === 'AVG') {
+      query = `SELECT ${safeX} AS label, AVG(CAST(${safeY} AS FLOAT)) AS value FROM ${safeSchema}.${safeTable} GROUP BY ${safeX} ORDER BY value DESC`;
+    } else {
+      query = `SELECT TOP 500 ${safeX} AS label, ${safeY} AS value FROM ${safeSchema}.${safeTable} ORDER BY ${safeX}`;
+    }
+
+    const result = await pool.request().query(query);
+
+    const labels = [];
+    const values = [];
+    for (const row of result.recordset) {
+      labels.push(String(row.label ?? ''));
+      values.push(Number(row.value) || 0);
+    }
+
+    res.json({ labels, values, xColumn, yColumn: aggregation === 'COUNT' ? 'COUNT(*)' : yColumn, aggregation });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `查询图表数据失败：${message}` });
+  } finally {
+    if (pool) {
+      await pool.close().catch(() => {});
+    }
+  }
+});
+
 app.use((_req, res) => {
   res.status(404).json({ message: 'Not Found' });
 });
