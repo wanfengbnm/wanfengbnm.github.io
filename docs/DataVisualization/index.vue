@@ -11,7 +11,9 @@ interface TableInfo {
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 type ChartType = 'bar' | 'line' | 'pie' | 'scatter';
 
-const apiEndpoint = '/api/sqlserver';
+const apiEnv = (import.meta as unknown as { env?: Record<string, string> }).env;
+const apiBase = apiEnv?.VITE_SQLSERVER_API_BASE || '';
+const apiEndpoint = apiBase ? `${apiBase}/api/sqlserver` : '/api/sqlserver';
 
 const form = ref({
   server: '',
