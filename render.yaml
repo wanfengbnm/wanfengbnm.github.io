@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: wanfengbnm-sqlserver-api
-    env: node
-    rootDir: server
-    buildCommand: pnpm install
-    startCommand: pnpm start
-    plan: free
