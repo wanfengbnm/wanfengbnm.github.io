@@ -20,9 +20,9 @@ const form = ref({
   instanceName: '',
 });
 
-const apiEnv = (import.meta as unknown as { env?: Record<string, string> }).env;
-const apiBase = apiEnv?.VITE_SQLSERVER_API_BASE || '';
-const apiEndpoint = apiBase ? `${apiBase}/api/sqlserver/diagram` : '/api/sqlserver/diagram';
+import { API_ORIGIN } from '../apiConfig';
+
+const apiEndpoint = API_ORIGIN ? `${API_ORIGIN}/api/sqlserver/diagram` : '/api/sqlserver/diagram';
 const previewState = ref<PreviewState>('idle');
 const previewTitle = ref('等待生成可视化图像');
 const previewMessage = ref('填写 SQL Server 连接信息并点击生成，右侧将展示数据库结构图。');
