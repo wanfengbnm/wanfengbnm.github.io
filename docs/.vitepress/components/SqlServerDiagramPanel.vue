@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 type PreviewState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -18,6 +18,17 @@ const form = ref({
   username: '',
   password: '',
   instanceName: '',
+});
+
+const connecting = ref(false);
+const connected = ref(false);
+const serverDatabases = ref<string[]>([]);
+
+onMounted(() => {
+  const saved = localStorage.getItem('sqlserver_diagram_server');
+  if (saved) {
+    form.value.server = saved;
+  }
 });
 
 import { API_ORIGIN } from '../apiConfig';
@@ -137,11 +148,69 @@ const buildPayload = () => ({
   instanceName: form.value.instanceName.trim(),
 });
 
+const saveServer = () => {
+  localStorage.setItem('sqlserver_diagram_server', form.value.server.trim());
+  if (connected.value) {
+    connected.value = false;
+    serverDatabases.value = [];
+    form.value.database = '';
+  }
+};
+
+const connectToServer = async () => {
+  errorMessage.value = '';
+  if (!form.value.server.trim() || !form.value.username.trim() || !form.value.password) {
+    errorMessage.value = '请至少填写服务器地址、用户名和密码。';
+    return;
+  }
+
+  connecting.value = true;
+  connected.value = false;
+  serverDatabases.value = [];
+  form.value.database = '';
+  saveServer();
+
+  const listEndpoint = API_ORIGIN ? `${API_ORIGIN}/api/sqlserver/list-databases` : '/api/sqlserver/list-databases';
+
+  try {
+    const resp = await fetch(listEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        server: form.value.server.trim(),
+        port: form.value.port.trim(),
+        username: form.value.username.trim(),
+        password: form.value.password,
+        instanceName: form.value.instanceName.trim(),
+      }),
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.message || '连接失败');
+
+    serverDatabases.value = data.databases || [];
+    if (serverDatabases.value.length === 0) {
+      throw new Error('服务器上未找到可用数据库。');
+    }
+    connected.value = true;
+    errorMessage.value = '';
+  } catch (err) {
+    connected.value = false;
+    errorMessage.value = err instanceof Error ? err.message : '连接服务器失败';
+  } finally {
+    connecting.value = false;
+  }
+};
+
 const submit = async () => {
   errorMessage.value = '';
 
-  if (!form.value.server.trim() || !form.value.database.trim() || !form.value.username.trim() || !form.value.password) {
-    errorMessage.value = '请至少填写服务器地址、数据库名、用户名和密码。';
+  if (!form.value.server.trim() || !form.value.username.trim() || !form.value.password) {
+    errorMessage.value = '请至少填写服务器地址、用户名和密码。';
+    return;
+  }
+  if (!form.value.database.trim()) {
+    errorMessage.value = '请先连接服务器并选择数据库。';
     return;
   }
 
@@ -250,7 +319,10 @@ onBeforeUnmount(() => {
   <section class="sql-panel" aria-labelledby="sql-panel-title">
     <div class="sql-panel__header">
       <div>
-        <p class="sql-panel__eyebrow">便携式数据库可视化工具</p>
+        <p class="sql-panel__eyebrow">
+          便携式数据库可视化工具
+          <span class="sql-info-icon" title="该功能目前仅用于帮助开发者观察数据库内部数据，后台不会存储所输入的数据库信息">!</span>
+        </p>
         <h2 id="sql-panel-title">SQL Server 数据库可视化</h2>
         <p class="sql-panel__desc">输入数据库连接信息后，请求后端生成结构图，并直接渲染到首页下方。</p>
       </div>
@@ -261,13 +333,13 @@ onBeforeUnmount(() => {
       <form class="sql-form" @submit.prevent="submit">
         <label>
           <span>服务器地址</span>
-          <input v-model="form.server" type="text" placeholder="例如 192.168.1.10" />
+          <input v-model="form.server" type="text" placeholder="例如 192.168.1.10" @input="saveServer" />
         </label>
 
         <div class="sql-form__row">
           <label>
             <span>端口</span>
-            <input v-model="form.port" type="text" placeholder="1433" />
+            <input v-model="form.port" type="text" placeholder="1433" @input="saveServer" />
           </label>
 
           <label>
@@ -277,21 +349,28 @@ onBeforeUnmount(() => {
         </div>
 
         <label>
-          <span>数据库名</span>
-          <input v-model="form.database" type="text" placeholder="例如 business_db" />
-        </label>
-
-        <label>
           <span>用户名</span>
-          <input v-model="form.username" type="text" placeholder="数据库账号" />
+          <input v-model="form.username" type="text" placeholder="数据库账号" @input="saveServer" />
         </label>
 
         <label>
           <span>密码</span>
-          <input v-model="form.password" type="password" placeholder="数据库密码" />
+          <input v-model="form.password" type="password" placeholder="数据库密码" @input="saveServer" />
         </label>
 
-        <button class="sql-form__submit" type="submit" :disabled="previewState === 'loading'">
+        <button type="button" class="sql-form__connect" :disabled="connecting" @click="connectToServer">
+          {{ connecting ? '连接中...' : connected ? '已连接' : '连接服务器' }}
+        </button>
+
+        <label v-if="connected">
+          <span>选择数据库</span>
+          <select v-model="form.database">
+            <option value="">-- 请选择数据库 --</option>
+            <option v-for="db in serverDatabases" :key="db" :value="db">{{ db }}</option>
+          </select>
+        </label>
+
+        <button class="sql-form__submit" type="submit" :disabled="previewState === 'loading' || !connected">
           {{ previewState === 'loading' ? '生成中...' : '生成可视化图像' }}
         </button>
 
@@ -368,11 +447,29 @@ onBeforeUnmount(() => {
 }
 
 .sql-panel__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 8px;
   font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--vp-c-text-3, #888);
+}
+
+.sql-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--vp-c-text-3, #888);
+  font-size: 10px;
+  font-weight: 700;
+  font-style: normal;
+  cursor: help;
+  flex-shrink: 0;
 }
 
 .sql-panel h2 {
@@ -446,6 +543,37 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.sql-form__connect {
+  margin-top: 4px;
+  padding: 11px 16px;
+  border: 2px solid var(--vp-c-brand-1, #409eff);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--vp-c-brand-1, #409eff);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sql-form__connect:hover {
+  background: var(--vp-c-brand-soft, rgba(64, 158, 255, 0.1));
+}
+
+.sql-form__connect:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.sql-form select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider, rgba(0, 0, 0, 0.1));
+  background: var(--vp-c-bg-soft, rgba(0, 0, 0, 0.03));
+  color: var(--vp-c-text-1, #1f2328);
+  box-sizing: border-box;
 }
 
 .sql-form__submit {
@@ -634,6 +762,7 @@ onBeforeUnmount(() => {
   border-radius: 22px;
   background: var(--vp-c-bg, #fff);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
+  overflow: auto;
 }
 
 .sql-lightbox__header {
@@ -658,9 +787,12 @@ onBeforeUnmount(() => {
 }
 
 .sql-lightbox__image {
-  width: 100%;
-  max-height: calc(92vh - 70px);
-  object-fit: contain;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0 auto;
+  display: block;
   background: var(--vp-c-bg-soft, rgba(0, 0, 0, 0.02));
   border-radius: 16px;
 }
