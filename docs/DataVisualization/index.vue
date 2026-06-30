@@ -38,8 +38,15 @@ const chartValues = ref<number[]>([]);
 const chartXColumn = ref('');
 const chartYColumn = ref('');
 const chartTitle = ref('');
+const mode = ref<'single' | 'multi'>('single');
+const selectedTables = ref<string[]>([]);
+const joinRelations = ref<{from: {schema:string;table:string;column:string}; to: {schema:string;table:string;column:string}; fkName: string}[]>([]);
+const joinHubTable = ref<{schema: string; name: string} | null>(null);
+const qualifiedColumns = ref<{qualified: string; name: string; table: string; tableSchema: string; type: string}[]>([]);
+const joinDescription = ref('');
 const generating = ref(false);
 const errorMessage = ref('');
+const chartPanelRef = ref<{ downloadPNG: () => void; viewImage: () => void } | null>(null);
 
 const currentTable = computed(() =>
   tables.value.find((t) => `${t.schema}.${t.name}` === selectedTable.value)
@@ -170,6 +177,118 @@ const generateChart = async () => {
   }
 };
 
+const onJoinTablesChange = async () => {
+  xColumn.value = '';
+  yColumn.value = '';
+  qualifiedColumns.value = [];
+  joinRelations.value = [];
+  joinHubTable.value = null;
+  joinDescription.value = '';
+  chartLabels.value = [];
+  chartValues.value = [];
+  errorMessage.value = '';
+
+  if (selectedTables.value.length < 2) return;
+
+  try {
+    const tablesPayload = selectedTables.value.map((key) => {
+      const [s, ...n] = key.split('.');
+      return { schema: s, name: n.join('.') };
+    });
+
+    const resp = await fetch(`${apiEndpoint}/join-relations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...buildPayload(), tables: tablesPayload }),
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.message || '关系检测失败');
+
+    joinRelations.value = data.relations || [];
+    joinHubTable.value = data.hubTable || null;
+    qualifiedColumns.value = data.columns || [];
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : '关系检测失败';
+    joinRelations.value = [];
+  }
+};
+
+const generateJoinChart = async () => {
+  if (selectedTables.value.length < 2 || !xColumn.value) {
+    errorMessage.value = '请选择表和 X 轴列。';
+    return;
+  }
+
+  const tablesPayload = selectedTables.value.map((key) => {
+    const [s, ...n] = key.split('.');
+    return { schema: s, name: n.join('.') };
+  });
+
+  const parseQualified = (q: string) => {
+    const dotIdx = q.indexOf('.');
+    if (dotIdx === -1) return null;
+    const tbl = q.slice(0, dotIdx);
+    const col = q.slice(dotIdx + 1);
+    const found = qualifiedColumns.value.find((c) => c.qualified === q);
+    return found ? { qualified: q, name: col, table: tbl, tableSchema: found.tableSchema } : null;
+  };
+
+  const xColObj = parseQualified(xColumn.value);
+  const yColObj = yColumn.value ? parseQualified(yColumn.value) : null;
+
+  if (!xColObj) {
+    errorMessage.value = 'X 轴列无效。';
+    return;
+  }
+
+  generating.value = true;
+  errorMessage.value = '';
+
+  try {
+    const resp = await fetch(`${apiEndpoint}/join-data`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...buildPayload(),
+        tables: tablesPayload,
+        hubTable: joinHubTable.value,
+        xColumn: xColObj,
+        yColumn: yColObj,
+        aggregation: aggregation.value,
+      }),
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.message || '查询失败');
+
+    chartLabels.value = data.labels || [];
+    chartValues.value = data.values || [];
+    chartXColumn.value = data.xColumn || '';
+    chartYColumn.value = data.yColumn || '';
+    joinDescription.value = data.joinDescription || '';
+    chartTitle.value = `JOIN: ${joinDescription.value} — ${data.xColumn}${data.aggregation !== 'NONE' ? ` ${data.aggregation} ${data.yColumn}` : ''}`;
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : '生成图表失败';
+    chartLabels.value = [];
+    chartValues.value = [];
+  } finally {
+    generating.value = false;
+  }
+};
+
+const resetJoinState = () => {
+  selectedTables.value = [];
+  joinRelations.value = [];
+  joinHubTable.value = null;
+  qualifiedColumns.value = [];
+  joinDescription.value = '';
+  xColumn.value = '';
+  yColumn.value = '';
+  chartLabels.value = [];
+  chartValues.value = [];
+};
+
 const aggregationOptions = [
   { value: 'COUNT', label: 'COUNT — 计数' },
   { value: 'SUM', label: 'SUM — 求和' },
@@ -237,8 +356,17 @@ const chartTypeOptions = [
           <p v-if="connMessage" class="dv-status" :class="`dv-status--${connState}`">{{ connMessage }}</p>
         </section>
 
-        <!-- 图表配置 -->
+        <!-- 查询模式切换 -->
         <section v-if="connState === 'connected'" class="dv-card">
+          <h2>查询模式</h2>
+          <div class="dv-mode-toggle">
+            <button class="dv-mode-btn" :class="{ 'dv-mode-btn--active': mode === 'single' }" @click="mode = 'single'; resetJoinState()">单表查询</button>
+            <button class="dv-mode-btn" :class="{ 'dv-mode-btn--active': mode === 'multi' }" @click="mode = 'multi'">多表 JOIN 查询</button>
+          </div>
+        </section>
+
+        <!-- 图表配置（单表模式） -->
+        <section v-if="connState === 'connected' && mode === 'single'" class="dv-card">
           <h2>图表配置</h2>
 
           <label>
@@ -291,11 +419,77 @@ const chartTypeOptions = [
 
           <p v-if="errorMessage" class="dv-error">{{ errorMessage }}</p>
         </section>
+
+        <!-- 多表 JOIN 配置 -->
+        <section v-if="connState === 'connected' && mode === 'multi'" class="dv-card">
+          <h2>多表 JOIN 配置</h2>
+
+          <label>
+            <span>选择表（至少 2 张）</span>
+            <div class="dv-multi-select">
+              <div v-for="t in tables" :key="`${t.schema}.${t.name}`" class="dv-checkbox-label">
+                <span class="dv-checkbox-text">{{ t.schema }}.{{ t.name }} ({{ t.columns.length }} 列)</span>
+                <input type="checkbox" :value="`${t.schema}.${t.name}`" v-model="selectedTables" @change="onJoinTablesChange" />
+              </div>
+            </div>
+          </label>
+
+          <div v-if="joinRelations.length > 0" class="dv-join-info">
+            <p class="dv-join-info__title">检测到的外键关系：</p>
+            <p v-for="rel in joinRelations" :key="rel.fkName" class="dv-join-info__rel">
+              {{ rel.from.schema }}.{{ rel.from.table }}.{{ rel.from.column }} → {{ rel.to.schema }}.{{ rel.to.table }}.{{ rel.to.column }}
+            </p>
+            <p v-if="joinHubTable" class="dv-join-info__hub">
+              中心表：{{ joinHubTable.schema }}.{{ joinHubTable.name }}
+            </p>
+          </div>
+
+          <label>
+            <span>X 轴列（分组列）</span>
+            <select v-model="xColumn" :disabled="qualifiedColumns.length === 0">
+              <option value="">-- 请选择列 --</option>
+              <option v-for="col in qualifiedColumns" :key="col.qualified" :value="col.qualified">
+                {{ col.qualified }} ({{ col.type }})
+              </option>
+            </select>
+          </label>
+
+          <label v-if="yColumnRequired">
+            <span>Y 轴列（数值列）</span>
+            <select v-model="yColumn" :disabled="qualifiedColumns.length === 0">
+              <option value="">-- 请选择列 --</option>
+              <option v-for="col in qualifiedColumns" :key="col.qualified" :value="col.qualified">
+                {{ col.qualified }} ({{ col.type }})
+              </option>
+            </select>
+          </label>
+
+          <label>
+            <span>聚合方式</span>
+            <select v-model="aggregation">
+              <option v-for="opt in aggregationOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </label>
+
+          <label>
+            <span>图表类型</span>
+            <select v-model="chartType">
+              <option v-for="opt in chartTypeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+            </select>
+          </label>
+
+          <button class="dv-btn dv-btn--primary" :disabled="generating || joinRelations.length === 0 || !xColumn" @click="generateJoinChart">
+            {{ generating ? '生成中...' : '生成 JOIN 图表' }}
+          </button>
+
+          <p v-if="errorMessage" class="dv-error">{{ errorMessage }}</p>
+        </section>
       </aside>
 
       <!-- 右侧图表面板 -->
       <main class="dv-main">
         <DataChartPanel
+          ref="chartPanelRef"
           :labels="chartLabels"
           :values="chartValues"
           :chart-type="chartType"
@@ -303,6 +497,10 @@ const chartTypeOptions = [
           :x-column="chartXColumn"
           :y-column="chartYColumn"
         />
+        <div v-if="chartLabels.length" class="dv-chart-toolbar">
+          <button class="dv-chart-btn" @click="chartPanelRef?.downloadPNG()">下载 PNG</button>
+          <button class="dv-chart-btn" @click="chartPanelRef?.viewImage()">查看图片</button>
+        </div>
       </main>
     </div>
   </div>
@@ -329,13 +527,6 @@ const chartTypeOptions = [
   margin: 0;
   color: var(--vp-c-text-2, #555);
   font-size: 14px;
-}
-
-.dv-body {
-  display: grid;
-  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
 }
 
 .dv-sidebar {
@@ -440,6 +631,37 @@ const chartTypeOptions = [
   min-height: 460px;
 }
 
+.dv-chart-toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+.dv-body {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.dv-chart-btn {
+  padding: 7px 20px;
+  border: 1px solid var(--vp-c-divider, rgba(0, 0, 0, 0.1));
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft, rgba(0, 0, 0, 0.03));
+  color: var(--vp-c-text-2, #555);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dv-chart-btn:hover {
+  border-color: var(--vp-c-brand-1, #409eff);
+  color: var(--vp-c-brand-1, #409eff);
+  background: var(--vp-c-brand-soft, rgba(64, 158, 255, 0.08));
+}
+
 @media (max-width: 900px) {
   .dv-body {
     grid-template-columns: 1fr;
@@ -462,5 +684,76 @@ const chartTypeOptions = [
   .dv-card {
     padding: 16px;
   }
+}
+
+.dv-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.dv-mode-btn {
+  padding: 10px;
+  border: 2px solid var(--vp-c-divider, rgba(0, 0, 0, 0.1));
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft, rgba(0, 0, 0, 0.03));
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: var(--vp-c-text-1, #1f2328);
+}
+
+.dv-mode-btn--active {
+  border-color: var(--vp-c-brand-1, #409eff);
+  background: color-mix(in srgb, var(--vp-c-brand-soft, rgba(64, 158, 255, 0.12)) 60%, transparent);
+  color: var(--vp-c-brand-1, #409eff);
+}
+
+.dv-multi-select {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--vp-c-divider, rgba(0, 0, 0, 0.1));
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.dv-checkbox-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dv-checkbox-label:hover {
+  background: var(--vp-c-bg-soft, rgba(0, 0, 0, 0.03));
+  border-radius: 6px;
+}
+
+.dv-join-info {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vp-c-brand-soft, rgba(64, 158, 255, 0.08)) 60%, transparent);
+  font-size: 13px;
+}
+
+.dv-join-info__title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--vp-c-text-1, #1f2328);
+}
+
+.dv-join-info__rel {
+  margin: 3px 0;
+  font-family: monospace;
+  color: var(--vp-c-brand-1, #409eff);
+}
+
+.dv-join-info__hub {
+  margin: 8px 0 0;
+  font-weight: 600;
+  color: var(--vp-c-text-1, #1f2328);
 }
 </style>

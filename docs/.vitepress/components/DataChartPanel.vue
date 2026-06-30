@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import * as echarts from 'echarts';
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const props = defineProps<{
   labels: string[];
@@ -29,10 +29,10 @@ const buildOption = (): echarts.EChartsOption => {
       type: 'scroll',
     },
     grid: props.chartType !== 'pie' ? {
-      left: '3%',
-      right: '4%',
-      bottom: '15%',
-      top: '18%',
+      left: 60,
+      right: 60,
+      bottom: 100,
+      top: 60,
       containLabel: true,
     } : undefined,
   };
@@ -65,11 +65,13 @@ const buildOption = (): echarts.EChartsOption => {
         type: 'category',
         data: props.labels,
         name: props.xColumn,
-        axisLabel: { rotate: 30 },
+        axisLabel: { rotate: 30, fontSize: 11, overflow: 'breakAll' },
+        nameTextStyle: { fontSize: 12, padding: [0, 0, 0, 4] },
       },
       yAxis: {
         type: 'value',
         name: props.yColumn,
+        nameTextStyle: { fontSize: 12, padding: [0, 4, 0, 0] },
       },
       series: [{
         type: 'scatter',
@@ -85,11 +87,13 @@ const buildOption = (): echarts.EChartsOption => {
       type: 'category',
       data: props.labels,
       name: props.xColumn,
-      axisLabel: { rotate: props.labels.length > 8 ? 30 : 0 },
+      axisLabel: { rotate: props.labels.length > 8 ? 30 : 0, fontSize: 11, overflow: 'breakAll' },
+      nameTextStyle: { fontSize: 12, padding: [0, 0, 0, 4] },
     },
     yAxis: {
       type: 'value',
       name: props.yColumn,
+      nameTextStyle: { fontSize: 12, padding: [0, 4, 0, 0] },
     },
     series: [{
       type: props.chartType,
@@ -112,14 +116,40 @@ const renderChart = () => {
     chart = echarts.init(chartContainer.value);
   }
   chart.setOption(buildOption(), true);
+  chart.resize();
 };
+
+const getImageUrl = () => {
+  if (!chart) return '';
+  return chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' });
+};
+
+const downloadPNG = () => {
+  const url = getImageUrl();
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${props.title || 'chart'}.png`;
+  a.click();
+};
+
+const viewImage = () => {
+  const url = getImageUrl();
+  if (!url) return;
+  const w = window.open('', '_blank');
+  if (w) {
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>图表预览</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f5f7fa}img{max-width:100%;max-height:100vh;box-shadow:0 4px 24px rgba(0,0,0,.1)}</style></head><body><img src="${url}" /></body></html>`);
+    w.document.close();
+  }
+};
+
+defineExpose({ downloadPNG, viewImage });
 
 const handleResize = () => {
   chart?.resize();
 };
 
 onMounted(() => {
-  renderChart();
   window.addEventListener('resize', handleResize);
 });
 
@@ -130,7 +160,9 @@ onBeforeUnmount(() => {
 });
 
 watch(() => [props.labels, props.values, props.chartType, props.title], () => {
-  renderChart();
+  nextTick(() => {
+    renderChart();
+  });
 }, { deep: true });
 </script>
 
@@ -152,7 +184,7 @@ watch(() => [props.labels, props.values, props.chartType, props.title], () => {
 
 .chart-panel__container {
   width: 100%;
-  height: 460px;
+  height: 520px;
 }
 
 .chart-panel__container--hidden {
@@ -177,4 +209,5 @@ watch(() => [props.labels, props.values, props.chartType, props.title], () => {
 .chart-panel__empty p {
   font-size: 14px;
 }
+
 </style>

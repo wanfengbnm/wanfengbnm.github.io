@@ -9,6 +9,8 @@ const rowHeight = 24;
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
+const safeId = (name) => `[${String(name).replace(/]/g, '')}]`;
+
 const escapeXml = (value = '') => String(value)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -110,6 +112,72 @@ const fetchSchema = async (pool) => {
     relations: relationsResult.recordset,
   };
 };
+
+function findJoinPath(tables, relations) {
+  const key = (s, t) => `${s}.${t}`;
+  const selectedKeys = new Set(tables.map((t) => key(t.schema, t.name)));
+
+  const relevant = relations.filter(
+    (r) => selectedKeys.has(key(r.from_schema, r.from_table))
+       && selectedKeys.has(key(r.to_schema, r.to_table))
+  );
+
+  if (relevant.length === 0) {
+    return { error: '未在所选表之间检测到外键关系。' };
+  }
+
+  const degree = {};
+  for (const t of tables) degree[key(t.schema, t.name)] = 0;
+  for (const r of relevant) {
+    degree[key(r.from_schema, r.from_table)]++;
+    degree[key(r.to_schema, r.to_table)]++;
+  }
+
+  let hubKey = null;
+  let maxDeg = -1;
+  for (const t of tables) {
+    const k = key(t.schema, t.name);
+    if (degree[k] > maxDeg) { maxDeg = degree[k]; hubKey = k; }
+  }
+
+  const [hubSchema, hubName] = hubKey.split('.');
+  const hubFKMap = {};
+  for (const r of relevant) {
+    const fromK = key(r.from_schema, r.from_table);
+    const toK = key(r.to_schema, r.to_table);
+    if (fromK === hubKey) hubFKMap[toK] = { dir: 'from', ...r };
+    if (toK === hubKey) hubFKMap[fromK] = { dir: 'to', ...r };
+  }
+
+  for (const t of tables) {
+    const k = key(t.schema, t.name);
+    if (k !== hubKey && !hubFKMap[k]) {
+      return { error: `表 ${k} 与中心表 ${hubKey} 之间没有外键关系。` };
+    }
+  }
+
+  const joins = [];
+  for (const t of tables) {
+    const k = key(t.schema, t.name);
+    if (k === hubKey) continue;
+    const rel = hubFKMap[k];
+    const cond = `${safeId(rel.from_schema)}.${safeId(rel.from_table)}.${safeId(rel.from_column)} = ${safeId(rel.to_schema)}.${safeId(rel.to_table)}.${safeId(rel.to_column)}`;
+    if (rel.dir === 'from') {
+      joins.push({ targetSchema: rel.to_schema, targetTable: rel.to_table, joinCondition: cond });
+    } else {
+      joins.push({ targetSchema: rel.from_schema, targetTable: rel.from_table, joinCondition: cond });
+    }
+  }
+
+  return {
+    hubSchema, hubName, joins,
+    relevantRelations: relevant.map((r) => ({
+      from: { schema: r.from_schema, table: r.from_table, column: r.from_column },
+      to: { schema: r.to_schema, table: r.to_table, column: r.to_column },
+      fkName: r.fk_name,
+    })),
+  };
+}
 
 const layoutTables = (tables) => {
   if (tables.length === 0) {
@@ -393,10 +461,10 @@ app.post('/api/sqlserver/chart-data', async (req, res) => {
       return res.status(400).json({ message: `列 ${yColumn} 在表 ${tableSchema}.${tableName} 中不存在。` });
     }
 
-    const safeSchema = `[${tableSchema}]`;
-    const safeTable = `[${tableName}]`;
-    const safeX = `[${xColumn}]`;
-    const safeY = aggregation !== 'COUNT' ? `[${yColumn}]` : null;
+    const safeSchema = safeId(tableSchema);
+    const safeTable = safeId(tableName);
+    const safeX = safeId(xColumn);
+    const safeY = aggregation !== 'COUNT' ? safeId(yColumn) : null;
 
     let query;
     if (aggregation === 'COUNT') {
@@ -426,6 +494,180 @@ app.post('/api/sqlserver/chart-data', async (req, res) => {
     if (pool) {
       await pool.close().catch(() => {});
     }
+  }
+});
+
+async function buildJoinQuery(pool, hubSchema, hubName, xCol, yCol, aggregation, joins) {
+  const allTables = [{ schema: hubSchema, name: hubName }];
+  for (const j of joins) {
+    allTables.push({ schema: j.targetSchema, name: j.targetTable });
+  }
+
+  for (const t of allTables) {
+    const check = await pool.request()
+      .input('schema', mssql.NVarChar, t.schema)
+      .input('table', mssql.NVarChar, t.name)
+      .query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = @table`);
+    const cols = new Set(check.recordset.map((r) => r.COLUMN_NAME));
+    if (cols.size === 0) {
+      throw new Error(`表 ${t.schema}.${t.name} 不存在或无列。`);
+    }
+    if (xCol.table === t.name && !cols.has(xCol.name)) {
+      throw new Error(`列 ${xCol.qualified} 在表 ${t.schema}.${t.name} 中不存在。`);
+    }
+    if (yCol && yCol.table === t.name && !cols.has(yCol.name)) {
+      throw new Error(`列 ${yCol.qualified} 在表 ${t.schema}.${t.name} 中不存在。`);
+    }
+  }
+
+  const hubRef = `${safeId(hubSchema)}.${safeId(hubName)}`;
+  const joinClauses = joins.map((j) => `LEFT JOIN ${safeId(j.targetSchema)}.${safeId(j.targetTable)} ON ${j.joinCondition}`).join('\n');
+
+  const safeX = `${safeId(xCol.tableSchema || hubSchema)}.${safeId(xCol.table)}.${safeId(xCol.name)}`;
+  const safeY = yCol ? `${safeId(yCol.tableSchema || hubSchema)}.${safeId(yCol.table)}.${safeId(yCol.name)}` : null;
+
+  if (aggregation === 'COUNT') {
+    return `SELECT ${safeX} AS label, COUNT(*) AS value FROM ${hubRef}\n${joinClauses}\nGROUP BY ${safeX} ORDER BY value DESC`;
+  }
+  if (aggregation === 'SUM') {
+    return `SELECT ${safeX} AS label, SUM(${safeY}) AS value FROM ${hubRef}\n${joinClauses}\nGROUP BY ${safeX} ORDER BY value DESC`;
+  }
+  if (aggregation === 'AVG') {
+    return `SELECT ${safeX} AS label, AVG(CAST(${safeY} AS FLOAT)) AS value FROM ${hubRef}\n${joinClauses}\nGROUP BY ${safeX} ORDER BY value DESC`;
+  }
+  return `SELECT TOP 500 ${safeX} AS label, ${safeY} AS value FROM ${hubRef}\n${joinClauses}\nORDER BY ${safeX}`;
+}
+
+app.post('/api/sqlserver/join-relations', async (req, res) => {
+  const { server, port, database, username, password, instanceName, tables } = req.body || {};
+
+  if (!server || !database || !username || !password || !Array.isArray(tables) || tables.length < 2) {
+    return res.status(400).json({ message: '请提供连接信息并选择至少 2 张表。' });
+  }
+
+  const config = buildConnectionConfig({ server, port, database, username, password, instanceName });
+  let pool;
+  try {
+    pool = await new mssql.ConnectionPool(config).connect();
+    const schema = await fetchSchema(pool);
+    const result = findJoinPath(tables, schema.relations);
+
+    if (result.error) {
+      return res.status(400).json({ message: result.error });
+    }
+
+    const hubTableObj = { schema: result.hubSchema, name: result.hubName };
+    const hubFull = schema.tables.find((t) => t.schema === result.hubSchema && t.name === result.hubName);
+
+    const columns = [];
+    const addColumns = (tbl) => {
+      if (!tbl) return;
+      for (const col of tbl.columns) {
+        columns.push({
+          qualified: `${tbl.name}.${col.name}`,
+          name: col.name,
+          table: tbl.name,
+          tableSchema: tbl.schema,
+          type: col.type,
+        });
+      }
+    };
+
+    addColumns(hubFull);
+    for (const j of result.joins) {
+      const tbl = schema.tables.find((t) => t.schema === j.targetSchema && t.name === j.targetTable);
+      addColumns(tbl);
+    }
+
+    res.json({
+      relations: result.relevantRelations,
+      hubTable: hubTableObj,
+      columns,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `检测表关系失败：${message}` });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
+  }
+});
+
+app.post('/api/sqlserver/join-data', async (req, res) => {
+  const { server, port, database, username, password, instanceName, tables, hubTable, xColumn, yColumn, aggregation } = req.body || {};
+
+  if (!server || !database || !username || !password || !Array.isArray(tables) || tables.length < 2 || !hubTable || !xColumn || !aggregation) {
+    return res.status(400).json({ message: '缺少必要参数。' });
+  }
+
+  const validAggs = ['COUNT', 'SUM', 'AVG', 'NONE'];
+  if (!validAggs.includes(aggregation)) {
+    return res.status(400).json({ message: `aggregation 必须是 ${validAggs.join('、')} 之一。` });
+  }
+  if (aggregation !== 'COUNT' && !yColumn) {
+    return res.status(400).json({ message: '非 COUNT 聚合需要提供 yColumn。' });
+  }
+
+  const config = buildConnectionConfig({ server, port, database, username, password, instanceName });
+  let pool;
+  try {
+    pool = await new mssql.ConnectionPool(config).connect();
+    const schema = await fetchSchema(pool);
+    const pathResult = findJoinPath(tables, schema.relations);
+
+    if (pathResult.error) {
+      return res.status(400).json({ message: pathResult.error });
+    }
+
+    const query = await buildJoinQuery(pool, hubTable.schema, hubTable.name, xColumn, yColumn, aggregation, pathResult.joins);
+    const result = await pool.request().query(query);
+
+    const labels = [];
+    const values = [];
+    for (const row of result.recordset) {
+      labels.push(String(row.label ?? ''));
+      values.push(Number(row.value) || 0);
+    }
+
+    const joinDesc = pathResult.relevantRelations
+      .map((r) => `${r.from.schema}.${r.from.table}.${r.from.column} → ${r.to.schema}.${r.to.table}.${r.to.column}`)
+      .join(', ');
+
+    res.json({
+      labels, values,
+      xColumn: xColumn.qualified || xColumn.name,
+      yColumn: aggregation === 'COUNT' ? 'COUNT(*)' : (yColumn.qualified || yColumn.name),
+      aggregation,
+      joinDescription: joinDesc,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `查询 JOIN 数据失败：${message}` });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
+  }
+});
+
+app.post('/api/sqlserver/list-databases', async (req, res) => {
+  const { server, port, username, password, instanceName } = req.body || {};
+
+  if (!server || !username || !password) {
+    return res.status(400).json({ message: '请提供服务器地址、用户名和密码。' });
+  }
+
+  const config = buildConnectionConfig({ server, port, database: 'master', username, password, instanceName });
+  let pool;
+  try {
+    pool = await new mssql.ConnectionPool(config).connect();
+    const result = await pool.request().query(`
+      SELECT name FROM sys.databases WHERE database_id > 4 ORDER BY name
+    `);
+    const databases = result.recordset.map((r) => r.name);
+    res.json({ databases });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '连接失败';
+    res.status(500).json({ message: `连接服务器失败：${message}` });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
