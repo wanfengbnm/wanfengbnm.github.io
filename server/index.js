@@ -1,10 +1,24 @@
 import express from 'express';
 import cors from 'cors';
 import mssql from 'mssql';
+import mysql from 'mysql2/promise';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
 const rowHeight = 24;
+
+// MySQL 连接池（腾讯云）
+const mysqlPool = mysql.createPool({
+  host: '101.33.242.241',
+  port: 3306,
+  database: 'mysql_mulpro',
+  user: 'sa',
+  password: 'REMOVED',
+  waitForConnections: true,
+  connectionLimit: 4,
+  queueLimit: 0,
+  connectTimeout: 15000,
+});
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
@@ -671,8 +685,309 @@ app.post('/api/sqlserver/list-databases', async (req, res) => {
   }
 });
 
-app.use((_req, res) => {
-  res.status(404).json({ message: 'Not Found' });
+// ==================== MySQL API ====================
+
+// 获取数据库中的所有表及其行数
+app.get('/api/mysql/tables', async (_req, res) => {
+  try {
+    const [tables] = await mysqlPool.query('SHOW TABLES');
+    const tableKey = Object.keys(tables[0] || {})[0] || 'Tables_in_mysql_mulpro';
+    const result = [];
+
+    for (const row of tables) {
+      const tableName = row[tableKey];
+      try {
+        const [countResult] = await mysqlPool.query(
+          `SELECT COUNT(*) AS cnt FROM \`${tableName}\``
+        );
+        result.push({ name: tableName, rowCount: countResult[0].cnt });
+      } catch {
+        result.push({ name: tableName, rowCount: 0 });
+      }
+    }
+
+    res.json({ tables: result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `获取表列表失败：${message}` });
+  }
+});
+
+// 获取表结构
+app.get('/api/mysql/tables/:name', async (req, res) => {
+  const { name } = req.params;
+  try {
+    const [columns] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    res.json({
+      tableName: name,
+      columns: columns.map((col) => ({
+        name: col.Field,
+        type: col.Type,
+        nullable: col.Null === 'YES',
+        key: col.Key || null,
+        default: col.Default,
+        extra: col.Extra || null,
+      })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `获取表结构失败：${message}` });
+  }
+});
+
+// 创建表
+app.post('/api/mysql/tables', async (req, res) => {
+  const { name, columns } = req.body || {};
+  if (!name || !Array.isArray(columns) || columns.length === 0) {
+    return res.status(400).json({ message: '请提供表名和至少一列的定义。' });
+  }
+
+  // 简单校验列名（防止注入）
+  const colNameRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  for (const col of columns) {
+    if (!colNameRegex.test(col.name)) {
+      return res.status(400).json({ message: `列名 "${col.name}" 不合法。` });
+    }
+  }
+
+  const colDefs = columns.map((col) => {
+    let def = `\`${col.name}\` ${col.type}`;
+    if (!col.nullable) def += ' NOT NULL';
+    if (col.default !== undefined && col.default !== null && col.default !== '') {
+      def += ` DEFAULT ${typeof col.default === 'string' && col.default.toUpperCase() !== 'CURRENT_TIMESTAMP' ? `'${col.default}'` : col.default}`;
+    }
+    if (col.autoInc) def += ' AUTO_INCREMENT';
+    if (col.pk) def += ' PRIMARY KEY';
+    return def;
+  });
+
+  const sql = `CREATE TABLE \`${name}\` (${colDefs.join(', ')})`;
+  try {
+    await mysqlPool.query(sql);
+    res.json({ message: `表 ${name} 创建成功。` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '创建失败';
+    res.status(500).json({ message: `创建表失败：${message}` });
+  }
+});
+
+// 删除表
+app.delete('/api/mysql/tables/:name', async (req, res) => {
+  const { name } = req.params;
+  try {
+    await mysqlPool.query(`DROP TABLE IF EXISTS \`${name}\``);
+    res.json({ message: `表 ${name} 已删除。` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '删除失败';
+    res.status(500).json({ message: `删除表失败：${message}` });
+  }
+});
+
+// 分页获取表数据
+app.get('/api/mysql/tables/:name/rows', async (req, res) => {
+  const { name } = req.params;
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize) || 20));
+  const search = req.query.search || '';
+  const orderBy = req.query.orderBy || '';
+  const orderDir = req.query.orderDir === 'asc' ? 'ASC' : 'DESC';
+  const offset = (page - 1) * pageSize;
+
+  try {
+    // 获取主键列（用于搜索和总数）
+    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const pkCol = cols.find((c) => c.Key === 'PRI')?.Field || cols[0]?.Field;
+    const stringCols = cols.filter((c) =>
+      ['varchar', 'char', 'text', 'longtext', 'mediumtext', 'tinytext'].some((t) =>
+        c.Type.toLowerCase().includes(t)
+      )
+    );
+
+    // 构建搜索条件
+    let whereClause = '';
+    const params = [];
+    if (search && stringCols.length > 0) {
+      const conditions = stringCols.map((c) => `\`${c.Field}\` LIKE ?`);
+      whereClause = `WHERE (${conditions.join(' OR ')})`;
+      for (let i = 0; i < stringCols.length; i++) {
+        params.push(`%${search}%`);
+      }
+    }
+
+    // 总数
+    const [countResult] = await mysqlPool.query(
+      `SELECT COUNT(*) AS total FROM \`${name}\` ${whereClause}`,
+      params
+    );
+    const total = countResult[0].total;
+
+    // 排序
+    let orderClause = '';
+    if (orderBy && cols.some((c) => c.Field === orderBy)) {
+      orderClause = `ORDER BY \`${orderBy}\` ${orderDir}`;
+    } else if (pkCol) {
+      orderClause = `ORDER BY \`${pkCol}\` DESC`;
+    }
+
+    // 数据
+    const [rows] = await mysqlPool.query(
+      `SELECT * FROM \`${name}\` ${whereClause} ${orderClause} LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset]
+    );
+
+    res.json({
+      tableName: name,
+      columns: cols.map((c) => ({
+        name: c.Field,
+        type: c.Type,
+        key: c.Key || null,
+      })),
+      rows,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `查询数据失败：${message}` });
+  }
+});
+
+// 插入行
+app.post('/api/mysql/tables/:name/rows', async (req, res) => {
+  const { name } = req.params;
+  const data = req.body || {};
+
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ message: '请提供要插入的数据。' });
+  }
+
+  const keys = Object.keys(data);
+  const values = Object.values(data);
+  const placeholders = keys.map(() => '?').join(', ');
+  const escapedKeys = keys.map((k) => `\`${k}\``).join(', ');
+
+  try {
+    const [result] = await mysqlPool.query(
+      `INSERT INTO \`${name}\` (${escapedKeys}) VALUES (${placeholders})`,
+      values
+    );
+    res.json({ message: '插入成功。', insertId: result.insertId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '插入失败';
+    res.status(500).json({ message: `插入数据失败：${message}` });
+  }
+});
+
+// 更新行
+app.put('/api/mysql/tables/:name/rows/:id', async (req, res) => {
+  const { name, id } = req.params;
+  const data = req.body || {};
+
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({ message: '请提供要更新的数据。' });
+  }
+
+  // 获取主键列名
+  try {
+    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const pkCol = cols.find((c) => c.Key === 'PRI')?.Field;
+
+    if (!pkCol) {
+      return res.status(400).json({ message: '该表没有主键，无法通过 ID 更新。' });
+    }
+
+    const setClauses = Object.keys(data)
+      .map((k) => `\`${k}\` = ?`)
+      .join(', ');
+    const values = [...Object.values(data), id];
+
+    const [result] = await mysqlPool.query(
+      `UPDATE \`${name}\` SET ${setClauses} WHERE \`${pkCol}\` = ?`,
+      values
+    );
+    res.json({ message: '更新成功。', affectedRows: result.affectedRows });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '更新失败';
+    res.status(500).json({ message: `更新数据失败：${message}` });
+  }
+});
+
+// 删除行
+app.delete('/api/mysql/tables/:name/rows/:id', async (req, res) => {
+  const { name, id } = req.params;
+
+  try {
+    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const pkCol = cols.find((c) => c.Key === 'PRI')?.Field;
+
+    if (!pkCol) {
+      return res.status(400).json({ message: '该表没有主键，无法通过 ID 删除。' });
+    }
+
+    const [result] = await mysqlPool.query(
+      `DELETE FROM \`${name}\` WHERE \`${pkCol}\` = ?`,
+      [id]
+    );
+    res.json({ message: '删除成功。', affectedRows: result.affectedRows });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '删除失败';
+    res.status(500).json({ message: `删除数据失败：${message}` });
+  }
+});
+
+// 执行 SQL（带安全限制）
+app.post('/api/mysql/query', async (req, res) => {
+  const { sql } = req.body || {};
+
+  if (!sql || typeof sql !== 'string') {
+    return res.status(400).json({ message: '请提供 SQL 语句。' });
+  }
+
+  const trimmed = sql.trim().toUpperCase();
+
+  // 禁止危险操作
+  const dangerous = ['DROP DATABASE', 'TRUNCATE', 'ALTER DATABASE'];
+  for (const keyword of dangerous) {
+    if (trimmed.includes(keyword)) {
+      return res.status(403).json({ message: `禁止执行包含 ${keyword} 的语句。` });
+    }
+  }
+
+  // 多语句检测
+  if (sql.includes(';')) {
+    // 允许单语句以分号结尾
+    const statements = sql.split(';').filter((s) => s.trim().length > 0);
+    if (statements.length > 1) {
+      return res.status(403).json({ message: '禁止执行多条 SQL 语句。' });
+    }
+  }
+
+  try {
+    const [rows, fields] = await mysqlPool.query(sql);
+
+    // 判断是否为 SELECT/SHOW/DESCRIBE（有结果集）
+    if (Array.isArray(rows)) {
+      res.json({
+        type: 'result',
+        columns: fields ? fields.map((f) => f.name) : [],
+        rows,
+        rowCount: rows.length,
+      });
+    } else {
+      // INSERT/UPDATE/DELETE 等
+      res.json({
+        type: 'affected',
+        affectedRows: rows.affectedRows || 0,
+        insertId: rows.insertId || 0,
+        message: `操作成功，影响 ${rows.affectedRows || 0} 行。`,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '执行失败';
+    res.status(500).json({ message: `SQL 执行失败：${message}` });
+  }
 });
 
 app.listen(port, () => {
