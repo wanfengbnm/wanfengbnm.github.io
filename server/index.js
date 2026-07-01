@@ -14,6 +14,7 @@ const mysqlPool = mysql.createPool({
   database: 'mysql_mulpro',
   user: 'sa',
   password: 'REMOVED',
+  charset: 'utf8mb4',
   waitForConnections: true,
   connectionLimit: 4,
   queueLimit: 0,
@@ -768,6 +769,28 @@ app.post('/api/mysql/tables', async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '创建失败';
     res.status(500).json({ message: `创建表失败：${message}` });
+  }
+});
+
+// 重新编号自增ID
+app.post('/api/mysql/tables/:name/renumber-ids', async (req, res) => {
+  const { name } = req.params;
+  try {
+    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const pkCol = cols.find((c) => c.Key === 'PRI');
+    if (!pkCol || !pkCol.Extra?.includes('auto_increment')) {
+      return res.status(400).json({ message: '该表没有自增主键，无法重新编号。' });
+    }
+    const pkName = pkCol.Field;
+    await mysqlPool.query(`SET @num = 0`);
+    await mysqlPool.query(`UPDATE \`${name}\` SET \`${pkName}\` = @num := @num + 1 ORDER BY \`${pkName}\``);
+    const [maxResult] = await mysqlPool.query(`SELECT MAX(\`${pkName}\`) AS max_id FROM \`${name}\``);
+    const nextId = (maxResult[0].max_id || 0) + 1;
+    await mysqlPool.query(`ALTER TABLE \`${name}\` AUTO_INCREMENT = ${nextId}`);
+    res.json({ message: `ID 重新编号完成，下次插入起始: ${nextId}。` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '重新编号失败';
+    res.status(500).json({ message: `重新编号失败：${message}` });
   }
 });
 
