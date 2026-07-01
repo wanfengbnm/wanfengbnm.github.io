@@ -9,9 +9,9 @@
       </div>
 
       <!-- 连接状态 -->
-      <div class="conn-status" :class="{ connected: dbConnected, error: !dbConnected }">
+      <div class="conn-status" :class="dbStatus">
         <span class="conn-dot"></span>
-        <span class="conn-text">{{ dbConnected ? 'mysql_mulpro · 已连接' : '数据库连接失败' }}</span>
+        <span class="conn-text">{{ statusText }}</span>
       </div>
 
       <!-- 表列表 -->
@@ -116,7 +116,7 @@
           </div>
           <div class="overview-card">
             <div class="ov-icon">🟢</div>
-            <div class="ov-value">{{ dbConnected ? '正常' : '异常' }}</div>
+            <div class="ov-value">{{ overviewStatus }}</div>
             <div class="ov-label">连接状态</div>
           </div>
           <div class="overview-card">
@@ -156,6 +156,9 @@
               @input="onSearchInput"
             />
             <button class="btn-primary" @click="openInsertRow">+ 新增行</button>
+            <button class="btn-secondary" @click="renumberIds" :disabled="renumbering">
+              {{ renumbering ? '处理中...' : '↻ 重新编号ID' }}
+            </button>
           </div>
 
           <div class="table-wrap">
@@ -347,8 +350,19 @@
 import { ref, computed, onMounted } from 'vue'
 
 // ====================== 状态 ======================
-const dbConnected = ref(false)
+const dbStatus = ref('connecting') // 'connecting' | 'connected' | 'error'
 const loadingTables = ref(false)
+
+const statusText = computed(() => {
+  if (dbStatus.value === 'connecting') return 'mysql_mulpro · 连接中...'
+  if (dbStatus.value === 'connected') return 'mysql_mulpro · 已连接'
+  return '数据库连接失败'
+})
+const overviewStatus = computed(() => {
+  if (dbStatus.value === 'connecting') return '连接中...'
+  if (dbStatus.value === 'connected') return '正常'
+  return '异常'
+})
 const tables = ref([])
 const selectedTable = ref('')
 const tableStructure = ref([])
@@ -360,8 +374,8 @@ const totalPages = ref(1)
 const page = ref(1)
 const pageSize = ref(20)
 const searchText = ref('')
-const sortBy = ref('')
-const sortDir = ref('desc')
+const sortBy = ref('id')
+const sortDir = ref('asc')
 const activeTab = ref('data')
 
 // SQL 编辑器
@@ -380,6 +394,7 @@ const showRowModal = ref(false)
 const editingRow = ref(null)
 const rowForm = ref({})
 const savingRow = ref(false)
+const renumbering = ref(false)
 
 const showDeleteConfirm = ref(false)
 const deleteTarget = ref('') // 'ROW' | 'TABLE'
@@ -400,6 +415,9 @@ const apiBase = () => {
 
 const apiUrl = (path) => `${apiBase()}/api/mysql${path}`
 
+// 只读字段（不在编辑表单中显示）
+const READONLY_COLS = ['id', 'created_at', 'updated_at']
+
 // ====================== 计算属性 ======================
 const tabs = [
   { key: 'data', label: '📋 浏览数据' },
@@ -408,7 +426,9 @@ const tabs = [
 ]
 
 const editableColumns = computed(() => {
-  return tableStructure.value.filter((col) => !col.extra?.includes('auto_increment'))
+  return tableStructure.value.filter((col) =>
+    !col.extra?.includes('auto_increment') && !READONLY_COLS.includes(col.name)
+  )
 })
 
 const totalRowCount = computed(() => {
@@ -432,19 +452,21 @@ onMounted(() => {
 // ====================== 表列表 ======================
 async function fetchTables() {
   loadingTables.value = true
-  dbConnected.value = false
+  dbStatus.value = 'connecting'
   try {
     const res = await fetch(apiUrl('/tables'))
     if (res.ok) {
       const data = await res.json()
       tables.value = data.tables || []
-      dbConnected.value = true
+      dbStatus.value = 'connected'
     } else {
       const err = await res.json()
       console.error('获取表列表失败:', err.message)
+      dbStatus.value = 'error'
     }
   } catch (e) {
     console.error('数据库连接失败:', e.message)
+    dbStatus.value = 'error'
   } finally {
     loadingTables.value = false
   }
@@ -461,7 +483,8 @@ function selectTable(name) {
   activeTab.value = 'data'
   page.value = 1
   searchText.value = ''
-  sortBy.value = ''
+  sortBy.value = 'id'
+  sortDir.value = 'asc'
   tableSqlQuery.value = `SELECT * FROM \`${name}\` LIMIT 100`
   sqlResult.value = null
   sqlError.value = ''
@@ -674,18 +697,44 @@ function openInsertRow() {
   editingRow.value = null
   rowForm.value = {}
   for (const col of tableStructure.value) {
-    if (!col.extra?.includes('auto_increment')) {
-      rowForm.value[col.name] = col.default ?? ''
+    if (!col.extra?.includes('auto_increment') && !READONLY_COLS.includes(col.name)) {
+      rowForm.value[col.name] = ''
     }
   }
   modalError.value = ''
   showRowModal.value = true
 }
 
+// ====================== 重新编号ID ======================
+async function renumberIds() {
+  if (!confirm(`确定要重新编号 "${selectedTable.value}" 的 ID 字段吗？`)) return
+  renumbering.value = true
+  try {
+    const res = await fetch(apiUrl(`/tables/${selectedTable.value}/renumber-ids`), { method: 'POST' })
+    const data = await res.json()
+    if (res.ok) {
+      fetchTableData()
+      fetchTables()
+    } else {
+      alert(data.message)
+    }
+  } catch (e) {
+    alert(`请求失败：${e.message}`)
+  } finally {
+    renumbering.value = false
+  }
+}
+
 // ====================== 编辑行 ======================
 function openEditRow(row) {
   editingRow.value = row
-  rowForm.value = { ...row }
+  rowForm.value = {}
+  for (const col of tableStructure.value) {
+    if (!READONLY_COLS.includes(col.name)) {
+      const val = row[col.name]
+      rowForm.value[col.name] = (val === null || val === undefined) ? '' : val
+    }
+  }
   modalError.value = ''
   showRowModal.value = true
 }
@@ -701,10 +750,16 @@ async function saveRow() {
 
   const method = editingRow.value ? 'PUT' : 'POST'
 
-  // 编辑时移除主键
-  const payload = { ...rowForm.value }
-  if (editingRow.value && primaryKey.value) {
-    delete payload[primaryKey.value]
+  // 过滤空值：nullable 列的空字符串转为 null
+  const payload = {}
+  for (const col of tableStructure.value) {
+    if (READONLY_COLS.includes(col.name)) continue
+    const val = rowForm.value[col.name]
+    if (val === '' && col.nullable) {
+      payload[col.name] = null
+    } else if (val !== '' || !col.nullable) {
+      payload[col.name] = val
+    }
   }
 
   try {
@@ -803,7 +858,7 @@ function handleLogout() {
 
 /* ========== 侧边栏 ========== */
 .mgmt-sidebar {
-  width: 240px;
+  width: 260px;
   background: #1e293b;
   color: #cbd5e1;
   display: flex;
@@ -813,26 +868,27 @@ function handleLogout() {
 }
 
 .sidebar-brand {
-  height: 56px;
+  height: 60px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  gap: 10px;
+  padding: 0 18px;
   border-bottom: 1px solid #334155;
 }
 
-.brand-icon { font-size: 20px; }
-.brand-text { font-size: 14px; font-weight: 700; color: #f1f5f9; }
+.brand-icon { font-size: 24px; }
+.brand-text { font-size: 17px; font-weight: 700; color: #f1f5f9; }
 
 /* 连接状态 */
 .conn-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  font-size: 12px;
+  padding: 12px 18px;
+  font-size: 14px;
   border-bottom: 1px solid #334155;
 }
+.conn-status.connecting { color: #facc15; }
 .conn-status.connected { color: #4ade80; }
 .conn-status.error { color: #f87171; }
 .conn-dot {
@@ -840,8 +896,14 @@ function handleLogout() {
   border-radius: 50%;
   flex-shrink: 0;
 }
+.connecting .conn-dot { background: #facc15; animation: pulse 1s infinite; }
 .connected .conn-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
 .error .conn-dot { background: #f87171; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 /* 表列表 */
 .sidebar-section {
@@ -854,19 +916,19 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px 4px;
+  padding: 10px 18px 6px;
 }
 .section-title {
-  font-size: 11px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: #64748b;
 }
 .section-count {
-  font-size: 11px;
+  font-size: 13px;
   background: #334155;
   color: #94a3b8;
-  padding: 1px 8px;
+  padding: 2px 10px;
   border-radius: 10px;
 }
 
@@ -875,10 +937,10 @@ function handleLogout() {
 .table-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 8px;
+  padding: 12px 18px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   transition: all 0.15s;
   border-left: 3px solid transparent;
 }
@@ -888,7 +950,7 @@ function handleLogout() {
   color: #60a5fa;
   border-left-color: #60a5fa;
 }
-.table-icon { font-size: 14px; flex-shrink: 0; }
+.table-icon { font-size: 16px; flex-shrink: 0; }
 .table-name-text {
   flex: 1;
   overflow: hidden;
@@ -896,16 +958,16 @@ function handleLogout() {
   white-space: nowrap;
 }
 .table-row-count {
-  font-size: 11px;
+  font-size: 12px;
   color: #64748b;
   background: #0f172a;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 8px;
   flex-shrink: 0;
 }
 .table-item.active .table-row-count { background: #1e3a5f; color: #93c5fd; }
 .table-delete {
-  font-size: 14px;
+  font-size: 16px;
   color: #64748b;
   opacity: 0;
   transition: opacity 0.15s;
@@ -920,24 +982,24 @@ function handleLogout() {
 .empty-tables, .loading-tables {
   padding: 20px 16px;
   text-align: center;
-  font-size: 13px;
+  font-size: 14px;
   color: #64748b;
 }
 
 /* 创建表按钮 */
 .sidebar-actions {
-  padding: 10px 16px;
+  padding: 12px 18px;
   border-top: 1px solid #334155;
 }
 .btn-new-table {
   width: 100%;
-  padding: 9px;
+  padding: 11px;
   border: 1px dashed #475569;
   background: transparent;
   color: #94a3b8;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 15px;
   transition: all 0.2s;
 }
 .btn-new-table:hover {
@@ -948,15 +1010,15 @@ function handleLogout() {
 
 /* 侧边栏底部 */
 .sidebar-footer {
-  padding: 12px 16px;
+  padding: 14px 18px;
   border-top: 1px solid #334155;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 .back-btn, .logout-btn {
-  font-size: 12px;
-  padding: 8px 12px;
+  font-size: 14px;
+  padding: 9px 12px;
   border-radius: 6px;
   cursor: pointer;
   text-align: center;
@@ -983,7 +1045,7 @@ function handleLogout() {
 }
 
 .card-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: #1e293b;
   margin-bottom: 16px;
@@ -1003,7 +1065,7 @@ function handleLogout() {
   border: 1px solid #d1d5db;
   border-radius: 8px;
   font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   color: #1e293b;
   background: #f8fafc;
@@ -1019,7 +1081,7 @@ function handleLogout() {
   color: #fff;
   border: none;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -1031,7 +1093,7 @@ function handleLogout() {
   background: #fef2f2;
   color: #dc2626;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
   white-space: pre-wrap;
 }
 .sql-result { margin-top: 16px; }
@@ -1040,10 +1102,10 @@ function handleLogout() {
   background: #f0fdf4;
   color: #16a34a;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
 }
 .sql-result-info {
-  font-size: 13px;
+  font-size: 14px;
   color: #64748b;
   margin-bottom: 8px;
 }
@@ -1062,9 +1124,9 @@ function handleLogout() {
   text-align: center;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
 }
-.ov-icon { font-size: 28px; margin-bottom: 8px; }
-.ov-value { font-size: 26px; font-weight: 700; color: #1e293b; }
-.ov-label { font-size: 12px; color: #64748b; margin-top: 4px; }
+.ov-icon { font-size: 32px; margin-bottom: 8px; }
+.ov-value { font-size: 28px; font-weight: 700; color: #1e293b; }
+.ov-label { font-size: 14px; color: #64748b; margin-top: 4px; }
 
 /* ========== 表视图 ========== */
 .table-view { animation: panelIn 0.2s ease; }
@@ -1080,17 +1142,17 @@ function handleLogout() {
   margin-bottom: 16px;
 }
 .table-name-title {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: #1e293b;
   margin: 0;
 }
 .btn-refresh {
-  padding: 6px 14px;
+  padding: 7px 16px;
   border: 1px solid #d1d5db;
   background: #fff;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   color: #475569;
   transition: all 0.15s;
@@ -1106,7 +1168,7 @@ function handleLogout() {
 }
 .tab-item {
   padding: 10px 20px;
-  font-size: 14px;
+  font-size: 15px;
   color: #64748b;
   cursor: pointer;
   border-bottom: 2px solid transparent;
@@ -1131,28 +1193,41 @@ function handleLogout() {
 .search-input {
   flex: 1;
   min-width: 180px;
-  padding: 9px 14px;
+  padding: 10px 14px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   color: #1e293b;
   outline: none;
   transition: border-color 0.2s;
 }
 .search-input:focus { border-color: #60a5fa; }
 .btn-primary {
-  padding: 9px 20px;
+  padding: 10px 22px;
   background: #3b82f6;
   color: #fff;
   border: none;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.2s;
 }
 .btn-primary:hover { background: #2563eb; }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-secondary {
+  padding: 10px 22px;
+  background: #fff;
+  color: #475569;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.btn-secondary:hover { background: #f1f5f9; }
+.btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ========== 表格 ========== */
 .table-wrap {
@@ -1166,7 +1241,7 @@ function handleLogout() {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 14px;
 }
 .data-table thead {
   background: #f8fafc;
@@ -1187,9 +1262,9 @@ function handleLogout() {
   user-select: none;
 }
 .data-table th.sortable:hover { color: #3b82f6; }
-.sort-icon { font-size: 11px; margin-left: 2px; }
+.sort-icon { font-size: 12px; margin-left: 2px; }
 .pk-badge {
-  font-size: 10px;
+  font-size: 11px;
   background: #fef3c7;
   color: #d97706;
   padding: 1px 5px;
@@ -1216,9 +1291,9 @@ function handleLogout() {
   padding: 40px 16px !important;
 }
 .col-name { font-weight: 600; color: #1e293b; }
-code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+code { font-family: 'Consolas', monospace; font-size: 13px; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
 .key-badge {
-  font-size: 11px;
+  font-size: 12px;
   background: #dbeafe;
   color: #2563eb;
   padding: 2px 8px;
@@ -1232,10 +1307,10 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   gap: 6px;
 }
 .btn-sm {
-  padding: 4px 12px;
+  padding: 5px 14px;
   border: none;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1258,14 +1333,14 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   border: 1px solid #d1d5db;
   background: #fff;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   color: #374151;
   transition: all 0.15s;
 }
 .pagination button:hover:not(:disabled) { background: #f1f5f9; }
 .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
-.page-info { font-size: 13px; color: #64748b; }
+.page-info { font-size: 14px; color: #64748b; }
 
 /* ========== 弹窗 ========== */
 .modal-overlay {
@@ -1288,24 +1363,24 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   box-shadow: 0 20px 60px rgba(0,0,0,0.2);
 }
 .modal-sm { width: 420px; }
-.modal h3 { font-size: 18px; color: #1e293b; margin-bottom: 20px; }
-.modal p { font-size: 14px; color: #475569; margin-bottom: 20px; }
+.modal h3 { font-size: 20px; color: #1e293b; margin-bottom: 20px; }
+.modal p { font-size: 15px; color: #475569; margin-bottom: 20px; }
 
 .form-group { margin-bottom: 16px; }
 .form-group label {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: #374151;
   margin-bottom: 6px;
 }
-.col-type-hint { font-weight: 400; color: #94a3b8; font-size: 12px; margin-left: 6px; }
+.col-type-hint { font-weight: 400; color: #94a3b8; font-size: 13px; margin-left: 6px; }
 .form-input {
   width: 100%;
-  padding: 9px 14px;
+  padding: 10px 14px;
   border: 1px solid #d1d5db;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   color: #1e293b;
   outline: none;
   transition: border-color 0.2s;
@@ -1323,19 +1398,19 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   flex-wrap: wrap;
 }
 .col-input {
-  padding: 6px 10px;
+  padding: 7px 10px;
   border: 1px solid #d1d5db;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   color: #1e293b;
   outline: none;
   box-sizing: border-box;
 }
 .col-input:focus { border-color: #60a5fa; }
-.col-input:first-child { width: 120px; }
-.col-input.type { width: 140px; }
+.col-input:first-child { width: 130px; }
+.col-input.type { width: 150px; }
 .col-check {
-  font-size: 12px;
+  font-size: 13px;
   color: #475569;
   display: flex;
   align-items: center;
@@ -1343,12 +1418,12 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   white-space: nowrap;
 }
 .btn-add-col {
-  padding: 6px 14px;
+  padding: 7px 14px;
   border: 1px dashed #d1d5db;
   background: transparent;
   color: #64748b;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1361,23 +1436,23 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   margin-top: 8px;
 }
 .btn-cancel {
-  padding: 9px 20px;
+  padding: 10px 22px;
   border: 1px solid #d1d5db;
   background: #fff;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
   color: #374151;
   transition: all 0.15s;
 }
 .btn-cancel:hover { background: #f1f5f9; }
 .btn-danger {
-  padding: 9px 20px;
+  padding: 10px 22px;
   background: #ef4444;
   color: #fff;
   border: none;
   border-radius: 8px;
-  font-size: 14px;
+  font-size: 15px;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -1389,6 +1464,6 @@ code { font-family: 'Consolas', monospace; font-size: 12px; background: #f1f5f9;
   background: #fef2f2;
   color: #dc2626;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 14px;
 }
 </style>
