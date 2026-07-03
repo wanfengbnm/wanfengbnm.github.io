@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import mssql from 'mssql';
 import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -880,10 +881,15 @@ app.get('/api/mysql/tables/:name/rows', async (req, res) => {
 // 插入行
 app.post('/api/mysql/tables/:name/rows', async (req, res) => {
   const { name } = req.params;
-  const data = req.body || {};
+  const data = { ...req.body || {} };
 
   if (Object.keys(data).length === 0) {
     return res.status(400).json({ message: '请提供要插入的数据。' });
+  }
+
+  // 自动哈希 password_plain → password
+  if (data.password_plain && data.password_plain !== '') {
+    data.password = await bcrypt.hash(data.password_plain, 10);
   }
 
   const keys = Object.keys(data);
@@ -906,10 +912,15 @@ app.post('/api/mysql/tables/:name/rows', async (req, res) => {
 // 更新行
 app.put('/api/mysql/tables/:name/rows/:id', async (req, res) => {
   const { name, id } = req.params;
-  const data = req.body || {};
+  const data = { ...req.body || {} };
 
   if (Object.keys(data).length === 0) {
     return res.status(400).json({ message: '请提供要更新的数据。' });
+  }
+
+  // 自动哈希 password_plain → password
+  if (data.password_plain && data.password_plain !== '') {
+    data.password = await bcrypt.hash(data.password_plain, 10);
   }
 
   // 获取主键列名
