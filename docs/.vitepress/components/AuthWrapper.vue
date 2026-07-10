@@ -1,8 +1,12 @@
 <template>
   <div class="container">
+    <!-- 验证中 -->
+    <div v-if="!authReady" class="login-box">
+      <h2>验证中...</h2>
+    </div>
 
     <!-- 未登录 -->
-    <div v-if="!isLogin" class="login-box">
+    <div v-else-if="!isLogin" class="login-box">
       <h2>管理员登录</h2>
 
       <input v-model="username" placeholder="请输入账号" />
@@ -29,47 +33,11 @@
         </div>
       </div>
 
-      <!-- 主内容：界面选择 -->
+      <!-- 主内容 -->
       <div class="main">
-        <div class="select-page">
-          <h2 class="select-title">请选择要进入的管理界面</h2>
-          <div class="select-cards">
-            <!-- FRP 服务器监控 -->
-            <div class="select-card" @click="openFrp">
-              <div class="card-icon frp-icon">
-                <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="4" y="8" width="40" height="32" rx="3" stroke="currentColor" stroke-width="2.5"/>
-                  <rect x="8" y="14" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/>
-                  <rect x="26" y="14" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/>
-                  <rect x="8" y="26" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/>
-                  <rect x="26" y="26" width="14" height="8" rx="1.5" stroke="currentColor" stroke-width="2"/>
-                  <circle cx="38" cy="10" r="3" fill="#22c55e" stroke="none"/>
-                </svg>
-              </div>
-              <h3>FRP 服务器监控</h3>
-              <p>查看 FRP 内网穿透服务运行状态、流量统计与客户端连接信息</p>
-              <span class="card-badge external">外部页面</span>
-            </div>
-
-            <!-- 管理后台 -->
-            <div class="select-card" @click="goManagement">
-              <div class="card-icon mgmt-icon">
-                <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="6" y="6" width="36" height="36" rx="4" stroke="currentColor" stroke-width="2.5"/>
-                  <path d="M6 16h36" stroke="currentColor" stroke-width="2.5"/>
-                  <path d="M6 32h36" stroke="currentColor" stroke-width="2.5"/>
-                  <rect x="12" y="22" width="8" height="6" rx="1.5" stroke="currentColor" stroke-width="2"/>
-                  <rect x="28" y="22" width="8" height="6" rx="1.5" stroke="currentColor" stroke-width="2"/>
-                  <circle cx="18" cy="10" r="2" fill="currentColor"/>
-                  <circle cx="24" cy="10" r="2" fill="currentColor"/>
-                  <circle cx="30" cy="10" r="2" fill="currentColor"/>
-                </svg>
-              </div>
-              <h3>系统管理后台</h3>
-              <p>用户管理、系统设置、操作日志等后台管理功能</p>
-              <span class="card-badge internal">站内页面</span>
-            </div>
-          </div>
+        <div class="redirect-card">
+          <div class="redirect-icon">🗄️</div>
+          <p>已登录，正在跳转至多平台数据库管理...</p>
         </div>
       </div>
 
@@ -82,6 +50,7 @@
 import { ref, onMounted } from 'vue'
 
 const isLogin = ref(false)
+const authReady = ref(false)
 const username = ref('')
 const password = ref('')
 const errorMsg = ref('')
@@ -92,13 +61,14 @@ const checkLogin = () => {
   const expire = localStorage.getItem('expire')
 
   if (token && expire && Date.now() < expire) {
-    isLogin.value = true
-    username.value = localStorage.getItem('last_username') || ''
-  } else {
-    localStorage.removeItem('token')
-    localStorage.removeItem('expire')
-    isLogin.value = false
+    // 已登录，直接跳转管理后台
+    window.location.href = '/Management/'
+    return
   }
+  localStorage.removeItem('token')
+  localStorage.removeItem('expire')
+  isLogin.value = false
+  authReady.value = true
 }
 
 onMounted(() => {
@@ -130,24 +100,11 @@ const login = () => {
     localStorage.setItem('token', 'admin-token')
     localStorage.setItem('expire', expireTime)
 
-    isLogin.value = true
+    // 直接跳转管理后台
+    window.location.href = '/Management/'
   } else {
     errorMsg.value = '账号或密码错误'
   }
-}
-
-// 打开 FRP 服务器监控
-const openFrp = () => {
-  const target = 'http://117.72.77.63:7500/static/#/'
-  const newWindow = window.open(target, '_blank')
-  if (!newWindow) {
-    errorMsg.value = '浏览器拦截了弹窗，请允许弹窗后重试'
-  }
-}
-
-// 进入管理后台
-const goManagement = () => {
-  window.location.href = '/Management/'
 }
 
 // 退出登录
@@ -297,136 +254,28 @@ const logout = () => {
   align-items: center;
 }
 
-/* ========== 选择页面 ========== */
-.select-page {
-  max-width: 780px;
-  width: 100%;
-  padding: 20px;
-}
-
-.select-title {
-  text-align: center;
-  font-size: 22px;
-  color: #1f2328;
-  margin-bottom: 36px;
-  font-weight: 600;
-}
-
-.select-cards {
-  display: flex;
-  gap: 28px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.select-card {
-  flex: 1;
-  min-width: 260px;
-  max-width: 340px;
+/* ========== 跳转提示 ========== */
+.redirect-card {
   background: #fff;
   border-radius: 16px;
-  padding: 32px 24px 24px;
-  cursor: pointer;
+  padding: 40px 36px;
   text-align: center;
-  border: 2px solid transparent;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  animation: fadeIn 0.4s ease;
 }
 
-.select-card:hover {
-  transform: translateY(-6px);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.12);
-}
-
-.select-card:first-child:hover {
-  border-color: #22c55e;
-}
-
-.select-card:last-child:hover {
-  border-color: var(--vp-c-brand-1, #409eff);
-}
-
-.card-icon {
-  width: 72px;
-  height: 72px;
-  margin: 0 auto 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 18px;
-  transition: transform 0.3s ease;
-}
-
-.select-card:hover .card-icon {
-  transform: scale(1.08);
-}
-
-.frp-icon {
-  background: #f0fdf4;
-  color: #22c55e;
-}
-
-.mgmt-icon {
-  background: #eff6ff;
-  color: var(--vp-c-brand-1, #409eff);
-}
-
-.card-icon svg {
-  width: 48px;
-  height: 48px;
-}
-
-.select-card h3 {
-  font-size: 18px;
-  color: #1f2328;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
-.select-card p {
-  font-size: 13px;
-  color: #6b7280;
-  line-height: 1.6;
+.redirect-icon {
+  font-size: 48px;
   margin-bottom: 16px;
 }
 
-.card-badge {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
+.redirect-card p {
+  font-size: 16px;
+  color: #64748b;
 }
 
-.card-badge.external {
-  background: #fef3c7;
-  color: #d97706;
-}
-
-.card-badge.internal {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-/* 动画 */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px)
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0)
-  }
-}
-
-.select-card {
-  animation: fadeIn 0.5s ease both;
-}
-
-.select-card:last-child {
-  animation-delay: 0.12s;
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

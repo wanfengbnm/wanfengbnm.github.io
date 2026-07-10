@@ -2,9 +2,8 @@
 layout: home
 
 hero:
-  name: Wanfengbnm生活日志
-
-  tagline: The Schedule Of Life
+  name: 多端数据库开发
+  tagline: Multi-Platform Database Development
   actions:
     - theme: brand
       text: 任务日志

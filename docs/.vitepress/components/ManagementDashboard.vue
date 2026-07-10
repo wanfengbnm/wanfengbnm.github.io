@@ -1,5 +1,5 @@
 <template>
-  <div class="mgmt-container">
+  <div v-if="authReady" class="mgmt-container">
 
     <!-- ==================== 侧边栏 ==================== -->
     <aside class="mgmt-sidebar">
@@ -51,17 +51,21 @@
       <div class="sidebar-actions">
         <button class="btn-new-table" @click="openCreateTable">+ 创建表</button>
       </div>
-
-      <!-- 底部 -->
-      <div class="sidebar-footer">
-        <div class="back-btn" @click="backToSelect">← 返回选择页</div>
-        <div class="logout-btn" @click="handleLogout">退出登录</div>
-      </div>
     </aside>
 
     <!-- ==================== 主内容区 ==================== -->
     <main class="mgmt-main">
 
+      <!-- 顶部工具栏 -->
+      <div class="main-toolbar">
+        <span class="main-title" v-if="selectedTable">{{ selectedTable }}</span>
+        <span class="main-title" v-else>总览</span>
+        <div class="main-toolbar-right">
+          <button class="btn-logout-top" @click="handleLogout">退出登录</button>
+        </div>
+      </div>
+
+      <div class="mgmt-content-area">
       <!-- ===== 未选中表：SQL 编辑器 + 概览 ===== -->
       <div v-if="!selectedTable" class="welcome-view">
         <div class="sql-card">
@@ -266,6 +270,7 @@
           </div>
         </div>
       </div>
+      </div>
     </main>
 
     <!-- ==================== 弹窗：创建表 ==================== -->
@@ -350,6 +355,7 @@
 import { ref, computed, onMounted } from 'vue'
 
 // ====================== 状态 ======================
+const authReady = ref(false)
 const dbStatus = ref('connecting') // 'connecting' | 'connected' | 'error'
 const loadingTables = ref(false)
 
@@ -446,6 +452,7 @@ onMounted(() => {
     window.location.href = '/TaskLog/'
     return
   }
+  authReady.value = true
   fetchTables()
 })
 
@@ -836,10 +843,6 @@ function formatCell(val) {
 }
 
 // ====================== 导航 ======================
-function backToSelect() {
-  window.location.href = '/TaskLog/'
-}
-
 function handleLogout() {
   localStorage.removeItem('token')
   localStorage.removeItem('expire')
@@ -859,6 +862,9 @@ function handleLogout() {
 /* ========== 侧边栏 ========== */
 .mgmt-sidebar {
   width: 260px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: #1e293b;
   color: #cbd5e1;
   display: flex;
@@ -869,6 +875,7 @@ function handleLogout() {
 
 .sidebar-brand {
   height: 60px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -881,6 +888,7 @@ function handleLogout() {
 
 /* 连接状态 */
 .conn-status {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -908,6 +916,7 @@ function handleLogout() {
 /* 表列表 */
 .sidebar-section {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px 0;
 }
@@ -988,6 +997,7 @@ function handleLogout() {
 
 /* 创建表按钮 */
 .sidebar-actions {
+  flex-shrink: 0;
   padding: 12px 18px;
   border-top: 1px solid #334155;
 }
@@ -1009,38 +1019,54 @@ function handleLogout() {
 }
 
 /* 侧边栏底部 */
-.sidebar-footer {
-  padding: 14px 18px;
-  border-top: 1px solid #334155;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.back-btn, .logout-btn {
-  font-size: 14px;
-  padding: 9px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.2s ease;
-}
-.back-btn {
-  background: transparent;
-  color: #94a3b8;
-  border: 1px solid #475569;
-}
-.back-btn:hover { background: #334155; color: #e2e8f0; }
-.logout-btn {
-  background: linear-gradient(135deg, #ef4444, #f87171);
-  color: #fff;
-}
-.logout-btn:hover { background: linear-gradient(135deg, #dc2626, #ef4444); }
 
 /* ========== 主内容区 ========== */
 .mgmt-main {
   flex: 1;
   background: #f1f5f9;
   overflow-y: auto;
+  padding: 0;
+}
+
+/* 顶部工具栏 */
+.main-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.main-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.main-toolbar-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.btn-logout-top {
+  padding: 7px 18px;
+  background: #fff;
+  color: #ef4444;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-logout-top:hover {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+
+/* 内容面板区 */
+.mgmt-content-area {
   padding: 28px 32px;
 }
 

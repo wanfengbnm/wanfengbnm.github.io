@@ -2,8 +2,8 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   lang: 'zh-CN',
-  title: "Wanfengbnm生活日志",
-  description: "Wanfengbnm生活日志",
+  title: "多端数据库开发",
+  description: "多端数据库开发 — 跨平台数据管理与可视化",
   vite: {
     server: {
       proxy: {
@@ -93,7 +93,7 @@ export default defineConfig({
     nav: [
       { text: '主页', link: '/' },
       {
-        text: 'APP后端管理',
+        text: '后端数据库管理',
         link: '/TaskLog/'
       },
       {
@@ -105,11 +105,6 @@ export default defineConfig({
         text: '文档研究',
         activeMatch: '/DocumentResearch/',
         link: '/DocumentResearch/'
-      },
-      {
-        text: '更新日志',
-        activeMatch: '/CHANGELOG/',
-        link: '/CHANGELOG/'
       }
     ],
     sidebar: {
