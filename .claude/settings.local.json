@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm add *)"
+      "Bash(pnpm add *)",
+      "Bash(git stash *)",
+      "Bash(git filter-branch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter \"git ls-files -z '*.js' '*.vue' '*.md' | xargs -0 sed -i 's/20040821chen/PASSWORD_REDACTED/g; s/20040821/PASSWORD_REDACTED/g' 2>/dev/null; true\" -- --all)"
     ]
   }
 }

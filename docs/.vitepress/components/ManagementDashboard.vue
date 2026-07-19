@@ -510,6 +510,18 @@ const apiBase = () => {
 
 const apiUrl = (path) => `${apiBase()}/api/mysql${path}`
 
+const AUTH_TOKEN = 'wanfengbnm-admin-token-2026'
+
+function apiFetch(path, opts) {
+  return apiFetch(path), {
+    ...opts,
+    headers: {
+      ...(opts?.headers || {}),
+      'Authorization': `Bearer ${AUTH_TOKEN}`,
+    },
+  })
+}
+
 // 只读字段（不在编辑表单中显示）
 const READONLY_COLS = ['id', 'created_at', 'updated_at']
 
@@ -549,7 +561,7 @@ onMounted(async () => {
 // ====================== 表列表 ======================
 async function fetchDatabases() {
   try {
-    const res = await fetch(apiUrl('/databases'))
+    const res = await apiFetch('/databases'))
     if (res.ok) {
       const data = await res.json()
       databases.value = data.databases || []
@@ -576,7 +588,7 @@ async function switchDb() {
     if (dbModalUser.value) body.user = dbModalUser.value
     if (dbModalPass.value) body.password = dbModalPass.value
 
-    const res = await fetch(apiUrl('/use-database'), {
+    const res = await apiFetch('/use-database'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -599,7 +611,7 @@ async function fetchTables() {
   loadingTables.value = true
   dbStatus.value = 'connecting'
   try {
-    const res = await fetch(apiUrl('/tables'))
+    const res = await apiFetch('/tables'))
     if (res.ok) {
       const data = await res.json()
       tables.value = data.tables || []
@@ -640,7 +652,7 @@ function selectTable(name) {
 
 async function fetchTableStructure() {
   try {
-    const res = await fetch(apiUrl(`/tables/${selectedTable.value}`))
+    const res = await apiFetch(`/tables/${selectedTable.value}`))
     if (res.ok) {
       const data = await res.json()
       tableStructure.value = data.columns
@@ -661,7 +673,7 @@ async function fetchTableData() {
       orderBy: sortBy.value,
       orderDir: sortDir.value,
     })
-    const res = await fetch(apiUrl(`/tables/${selectedTable.value}/rows?${params}`))
+    const res = await apiFetch(`/tables/${selectedTable.value}/rows?${params}`))
     if (res.ok) {
       const data = await res.json()
       tableRows.value = data.rows
@@ -711,7 +723,7 @@ async function runSql() {
   sqlResult.value = null
 
   try {
-    const res = await fetch(apiUrl('/query'), {
+    const res = await apiFetch('/query'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql: sqlQuery.value }),
@@ -738,7 +750,7 @@ async function runTableSql() {
   sqlResult.value = null
 
   try {
-    const res = await fetch(apiUrl('/query'), {
+    const res = await apiFetch('/query'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql: tableSqlQuery.value }),
@@ -792,7 +804,7 @@ async function createTable() {
   modalError.value = ''
 
   try {
-    const res = await fetch(apiUrl('/tables'), {
+    const res = await apiFetch('/tables'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -835,7 +847,7 @@ async function createColumn() {
   addingColumn.value = true
   modalError.value = ''
   try {
-    const res = await fetch(apiUrl(`/tables/${selectedTable.value}/columns`), {
+    const res = await apiFetch(`/tables/${selectedTable.value}/columns`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -890,7 +902,7 @@ async function renumberIds() {
   if (!confirm(`确定要重新编号 "${selectedTable.value}" 的 ID 字段吗？`)) return
   renumbering.value = true
   try {
-    const res = await fetch(apiUrl(`/tables/${selectedTable.value}/renumber-ids`), { method: 'POST' })
+    const res = await apiFetch(`/tables/${selectedTable.value}/renumber-ids`), { method: 'POST' })
     const data = await res.json()
     if (res.ok) {
       fetchTableData()
