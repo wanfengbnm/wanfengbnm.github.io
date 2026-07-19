@@ -8,20 +8,42 @@ const app = express();
 const port = Number(process.env.PORT || 3001);
 const rowHeight = 24;
 
-// MySQL 连接池（腾讯云）
-const mysqlPool = mysql.createPool({
-  host: '101.33.242.241',
-  port: 3306,
-  database: 'mysql_mulpro',
-  user: 'sa',
-  password: 'REMOVED',
-  charset: 'utf8mb4',
-  waitForConnections: true,
-  connectionLimit: 4,
-  queueLimit: 0,
-  connectTimeout: 15000,
-});
+// MySQL 连接池（腾讯云）— 动态切换数据库，支持每库独立凭据
+let currentDb = 'mysql_mulpro';
+const DEFAULT_USER = 'sa';
+const DEFAULT_PASS = 'REMOVED';
 
+// 存储每库专用凭据，key 为 database 名
+const dbCredentials = new Map();
+
+function createPoolForDb(database, user, password) {
+  return mysql.createPool({
+    host: '101.33.242.241',
+    port: 3306,
+    database,
+    user: user || DEFAULT_USER,
+    password: password || DEFAULT_PASS,
+    charset: 'utf8mb4',
+    waitForConnections: true,
+    connectionLimit: 4,
+    queueLimit: 0,
+    connectTimeout: 15000,
+  });
+}
+
+let mysqlPool = createPoolForDb(currentDb, DEFAULT_USER, DEFAULT_PASS);
+
+function switchDatabase(database, user, password) {
+  const oldPool = mysqlPool;
+  const u = user || dbCredentials.get(database)?.user || DEFAULT_USER;
+  const p = password || dbCredentials.get(database)?.password || DEFAULT_PASS;
+  mysqlPool = createPoolForDb(database, u, p);
+  currentDb = database;
+  if (user || password) {
+    dbCredentials.set(database, { user: u, password: p });
+  }
+  oldPool.end().catch(() => {});
+}
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
@@ -689,6 +711,36 @@ app.post('/api/sqlserver/list-databases', async (req, res) => {
 
 // ==================== MySQL API ====================
 
+// 获取服务器上所有数据库
+app.get('/api/mysql/databases', async (_req, res) => {
+  try {
+    const [rows] = await mysqlPool.query('SHOW DATABASES');
+    const databases = rows
+      .map((r) => Object.values(r)[0])
+      .filter((db) => !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(db));
+    res.json({ databases, current: currentDb });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '查询失败';
+    res.status(500).json({ message: `获取数据库列表失败：${message}` });
+  }
+});
+
+// 切换数据库
+app.post('/api/mysql/use-database', async (req, res) => {
+  const { database, user, password } = req.body || {};
+  if (!database) {
+    return res.status(400).json({ message: '请提供数据库名。' });
+  }
+  try {
+    switchDatabase(database, user, password);
+    await mysqlPool.query('SELECT 1');
+    res.json({ message: `已切换到数据库 ${database}。`, current: currentDb });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '切换失败';
+    res.status(500).json({ message: `切换数据库失败：${message}` });
+  }
+});
+
 // 获取数据库中的所有表及其行数
 app.get('/api/mysql/tables', async (_req, res) => {
   try {
@@ -712,6 +764,47 @@ app.get('/api/mysql/tables', async (_req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : '查询失败';
     res.status(500).json({ message: `获取表列表失败：${message}` });
+  }
+});
+
+// 给表新增列
+app.post('/api/mysql/tables/:name/columns', async (req, res) => {
+  const { name } = req.params;
+  const { colName, colType, nullable, defaultValue } = req.body || {};
+  if (!colName || !colType) {
+    return res.status(400).json({ message: '请提供列名和类型。' });
+  }
+  const colNameRegex = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+  if (!colNameRegex.test(colName)) {
+    return res.status(400).json({ message: `列名 "${colName}" 不合法。` });
+  }
+
+  let def = `ADD COLUMN \`${colName}\` ${colType}`;
+  if (!nullable) def += ' NOT NULL';
+  if (defaultValue !== undefined && defaultValue !== null && defaultValue !== '') {
+    const dq = typeof defaultValue === 'string' ? `'${defaultValue}'` : defaultValue;
+    def += ` DEFAULT ${dq}`;
+  } else if (!nullable) {
+    // 非空且无默认值时，根据类型给一个默认值
+    const t = colType.toUpperCase();
+    if (t.includes('INT') || t.includes('DECIMAL') || t.includes('FLOAT') || t.includes('DOUBLE') || t.includes('NUMERIC')) {
+      def += ' DEFAULT 0';
+    } else if (t.includes('CHAR') || t.includes('TEXT')) {
+      def += " DEFAULT ''";
+    } else if (t.includes('DATETIME') || t.includes('TIMESTAMP')) {
+      def += ' DEFAULT CURRENT_TIMESTAMP';
+    } else {
+      def += " DEFAULT ''";
+    }
+  }
+
+  const sql = `ALTER TABLE \`${name}\` ${def}`;
+  try {
+    await mysqlPool.query(sql);
+    res.json({ message: `列 ${colName} 已添加到表 ${name}。` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '操作失败';
+    res.status(500).json({ message: `添加列失败：${message}` });
   }
 });
 

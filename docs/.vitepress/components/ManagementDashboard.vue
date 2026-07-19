@@ -8,6 +8,14 @@
         <span class="brand-text">多平台数据库管理</span>
       </div>
 
+      <!-- 数据库选择 -->
+      <div class="db-selector">
+        <div class="db-current" @click="openDbModal">
+          <span class="db-label">📦 {{ selectedDb || '选择数据库' }}</span>
+          <span class="db-arrow">▾</span>
+        </div>
+      </div>
+
       <!-- 连接状态 -->
       <div class="conn-status" :class="dbStatus">
         <span class="conn-dot"></span>
@@ -60,6 +68,7 @@
         <span class="main-title" v-if="selectedTable">{{ selectedTable }}</span>
         <span class="main-title" v-else>总览</span>
         <div class="main-toolbar-right">
+          <button class="btn-refresh-top" @click="refreshAll">🔄 刷新状态</button>
           <button class="btn-logout-top" @click="handleLogout">退出登录</button>
         </div>
       </div>
@@ -114,7 +123,7 @@
           </div>
           <div class="overview-card">
             <div class="ov-icon">📝</div>
-            <div class="ov-value">{{ totalRows }}</div>
+            <div class="ov-value">{{ totalRowCount }}</div>
             <div class="ov-label">总行数</div>
           </div>
           <div class="overview-card">
@@ -134,7 +143,6 @@
       <div v-else class="table-view">
         <div class="table-header-bar">
           <h2 class="table-name-title">{{ selectedTable }}</h2>
-          <button class="btn-refresh" @click="refreshTableData">🔄 刷新</button>
         </div>
 
         <div class="tab-bar">
@@ -204,6 +212,9 @@
 
         <!-- Tab：表结构 -->
         <div v-if="activeTab === 'structure'" class="tab-content">
+          <div class="toolbar">
+            <button class="btn-primary" @click="openAddColumn">+ 新建列</button>
+          </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
@@ -272,6 +283,42 @@
       </div>
     </main>
 
+    <!-- ==================== 弹窗：切换数据库 ==================== -->
+    <div v-if="showDbModal" class="modal-overlay" @click.self="showDbModal = false">
+      <div class="modal modal-sm">
+        <h3>切换数据库</h3>
+        <div class="form-group">
+          <label>选择数据库</label>
+          <div class="db-list">
+            <div
+              v-for="db in databases"
+              :key="db"
+              class="db-option"
+              :class="{ active: dbModalDb === db }"
+              @click="dbModalDb = db"
+            >
+              📦 {{ db }}
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>用户名 <span class="col-type-hint">(为空则使用默认)</span></label>
+          <input v-model="dbModalUser" class="form-input" placeholder="默认: sa" />
+        </div>
+        <div class="form-group">
+          <label>密码 <span class="col-type-hint">(为空则使用默认)</span></label>
+          <input v-model="dbModalPass" type="password" class="form-input" placeholder="默认密码" />
+        </div>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showDbModal = false">取消</button>
+          <button class="btn-primary" @click="switchDb" :disabled="switchingDb || !dbModalDb">
+            {{ switchingDb ? '切换中...' : '切换' }}
+          </button>
+        </div>
+        <div v-if="modalError" class="modal-error">{{ modalError }}</div>
+      </div>
+    </div>
+
     <!-- ==================== 弹窗：创建表 ==================== -->
     <div v-if="showCreateTable" class="modal-overlay" @click.self="showCreateTable = false">
       <div class="modal">
@@ -298,6 +345,38 @@
           <button class="btn-cancel" @click="showCreateTable = false">取消</button>
           <button class="btn-primary" @click="createTable" :disabled="creatingTable">
             {{ creatingTable ? '创建中...' : '创建表' }}
+          </button>
+        </div>
+        <div v-if="modalError" class="modal-error">{{ modalError }}</div>
+      </div>
+    </div>
+
+    <!-- ==================== 弹窗：新建列 ==================== -->
+    <div v-if="showAddColumn" class="modal-overlay" @click.self="showAddColumn = false">
+      <div class="modal modal-sm">
+        <h3>新建列 — {{ selectedTable }}</h3>
+        <div class="form-group">
+          <label>列名</label>
+          <input v-model="newColumn.name" class="form-input" placeholder="例如：age" />
+        </div>
+        <div class="form-group">
+          <label>类型</label>
+          <input v-model="newColumn.type" class="form-input" placeholder="例如：VARCHAR(100), INT, DATETIME" />
+        </div>
+        <div class="form-group">
+          <label class="col-check"><input type="checkbox" v-model="newColumn.nullable" /> 允许为空 (NULL)</label>
+        </div>
+        <div class="form-group">
+          <label>默认值 <span class="col-type-hint">(可选，非空列无默认值将自动填充)</span></label>
+          <input v-model="newColumn.defaultVal" class="form-input" placeholder="留空则根据类型自动填充" />
+          <p class="form-hint" v-if="!newColumn.nullable && !newColumn.defaultVal">
+            非空列将自动填充默认值：数值→0，文本→''，日期时间→CURRENT_TIMESTAMP
+          </p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showAddColumn = false">取消</button>
+          <button class="btn-primary" @click="createColumn" :disabled="addingColumn">
+            {{ addingColumn ? '添加中...' : '添加列' }}
           </button>
         </div>
         <div v-if="modalError" class="modal-error">{{ modalError }}</div>
@@ -357,10 +436,13 @@ import { ref, computed, onMounted } from 'vue'
 const authReady = ref(false)
 const dbStatus = ref('connecting') // 'connecting' | 'connected' | 'error'
 const loadingTables = ref(false)
+const databases = ref([])
+const selectedDb = ref('')
 
 const statusText = computed(() => {
-  if (dbStatus.value === 'connecting') return 'mysql_mulpro · 连接中...'
-  if (dbStatus.value === 'connected') return 'mysql_mulpro · 已连接'
+  const dbName = selectedDb.value || 'mysql_mulpro'
+  if (dbStatus.value === 'connecting') return dbName + ' · 连接中...'
+  if (dbStatus.value === 'connected') return dbName + ' · 已连接'
   return '数据库连接失败'
 })
 const overviewStatus = computed(() => {
@@ -400,7 +482,15 @@ const editingRow = ref(null)
 const rowForm = ref({})
 const savingRow = ref(false)
 const renumbering = ref(false)
+const showAddColumn = ref(false)
+const newColumn = ref({ name: '', type: 'VARCHAR(255)', nullable: true, defaultVal: '', afterColumn: '' })
+const addingColumn = ref(false)
 
+const showDbModal = ref(false)
+const dbModalDb = ref('')
+const dbModalUser = ref('')
+const dbModalPass = ref('')
+const switchingDb = ref(false)
 const showDeleteConfirm = ref(false)
 const deleteTarget = ref('') // 'ROW' | 'TABLE'
 const deleteTableName = ref('')
@@ -441,7 +531,7 @@ const totalRowCount = computed(() => {
 })
 
 // ====================== 初始化 ======================
-onMounted(() => {
+onMounted(async () => {
   // 权限检查
   const token = localStorage.getItem('token')
   const expire = localStorage.getItem('expire')
@@ -452,10 +542,59 @@ onMounted(() => {
     return
   }
   authReady.value = true
+  await fetchDatabases()
   fetchTables()
 })
 
 // ====================== 表列表 ======================
+async function fetchDatabases() {
+  try {
+    const res = await fetch(apiUrl('/databases'))
+    if (res.ok) {
+      const data = await res.json()
+      databases.value = data.databases || []
+      selectedDb.value = data.current || (databases.value[0] || '')
+    }
+  } catch (e) {
+    console.error('获取数据库列表失败:', e.message)
+  }
+}
+
+function openDbModal() {
+  dbModalDb.value = selectedDb.value || (databases.value[0] || '')
+  dbModalUser.value = ''
+  dbModalPass.value = ''
+  modalError.value = ''
+  showDbModal.value = true
+}
+
+async function switchDb() {
+  switchingDb.value = true
+  modalError.value = ''
+  try {
+    const body = { database: dbModalDb.value }
+    if (dbModalUser.value) body.user = dbModalUser.value
+    if (dbModalPass.value) body.password = dbModalPass.value
+
+    const res = await fetch(apiUrl('/use-database'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    if (res.ok) {
+      selectedDb.value = dbModalDb.value
+      showDbModal.value = false
+      selectedTable.value = ''
+      sqlResult.value = null
+      sqlError.value = ''
+      fetchTables()
+    } else { modalError.value = data.message }
+  } catch (e) {
+    modalError.value = `切换失败：${e.message}`
+  } finally { switchingDb.value = false }
+}
+
 async function fetchTables() {
   loadingTables.value = true
   dbStatus.value = 'connecting'
@@ -562,12 +701,6 @@ function onSearchInput() {
     page.value = 1
     fetchTableData()
   }, 400)
-}
-
-function refreshTableData() {
-  fetchTableStructure()
-  fetchTableData()
-  fetchTables()
 }
 
 // ====================== SQL 执行 ======================
@@ -689,6 +822,39 @@ async function createTable() {
   }
 }
 
+// ====================== 新建列 ======================
+function openAddColumn() {
+  newColumn.value = { name: '', type: 'VARCHAR(255)', nullable: true, defaultVal: '', afterColumn: '' }
+  modalError.value = ''
+  showAddColumn.value = true
+}
+async function createColumn() {
+  if (!newColumn.value.name.trim()) { modalError.value = '请输入列名'; return }
+  const cn = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+  if (!cn.test(newColumn.value.name.trim())) { modalError.value = '列名含非法字符'; return }
+  addingColumn.value = true
+  modalError.value = ''
+  try {
+    const res = await fetch(apiUrl(`/tables/${selectedTable.value}/columns`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        colName: newColumn.value.name.trim(),
+        colType: newColumn.value.type.trim(),
+        nullable: newColumn.value.nullable,
+        defaultValue: newColumn.value.defaultVal || null,
+      }),
+    })
+    const data = await res.json()
+    if (res.ok) {
+      showAddColumn.value = false
+      fetchTableStructure()
+      fetchTableData()
+    } else { modalError.value = data.message }
+  } catch (e) { modalError.value = `请求失败：${e.message}` }
+  finally { addingColumn.value = false }
+}
+
 // ====================== 删除表 ======================
 function confirmDropTable(name) {
   deleteTarget.value = 'TABLE'
@@ -711,7 +877,15 @@ function openInsertRow() {
   showRowModal.value = true
 }
 
-// ====================== 重新编号ID ======================
+// ====================== 刷新状态 ======================
+async function refreshAll() {
+  await fetchDatabases()
+  fetchTables()
+  if (selectedTable.value) {
+    fetchTableStructure()
+    fetchTableData()
+  }
+}
 async function renumberIds() {
   if (!confirm(`确定要重新编号 "${selectedTable.value}" 的 ID 字段吗？`)) return
   renumbering.value = true
@@ -850,10 +1024,13 @@ function handleLogout() {
 </script>
 
 <style scoped>
+/* 隐藏 VitePress 底部 footer */
+:global(.VPFooter) { display: none !important; }
+
 /* ========== 容器布局 ========== */
 .mgmt-container {
   position: fixed;
-  inset: var(--vp-nav-height, 0px) 0 0 0;
+  inset: var(--vp-nav-height, 64px) 0 0 0;
   display: flex;
   z-index: 1;
 }
@@ -861,7 +1038,7 @@ function handleLogout() {
 /* ========== 侧边栏 ========== */
 .mgmt-sidebar {
   width: 260px;
-  height: calc(100vh - var(--vp-nav-height, 0px));
+  height: 100%;
   overflow: hidden;
   background: #1e293b;
   color: #cbd5e1;
@@ -883,6 +1060,58 @@ function handleLogout() {
 
 .brand-icon { font-size: 24px; }
 .brand-text { font-size: 17px; font-weight: 700; color: #f1f5f9; }
+
+/* 数据库选择器 */
+.db-selector {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid #334155;
+}
+.db-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.db-current:hover { border-color: #60a5fa; }
+.db-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+}
+.db-arrow {
+  font-size: 14px;
+  color: #64748b;
+}
+
+/* 数据库选项列表（弹窗中） */
+.db-list {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+.db-option {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #334155;
+  transition: all 0.1s;
+  border-bottom: 1px solid #f1f5f9;
+}
+.db-option:last-child { border-bottom: none; }
+.db-option:hover { background: #eff6ff; }
+.db-option.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
 
 /* 连接状态 */
 .conn-status {
@@ -1019,7 +1248,6 @@ function handleLogout() {
   flex: 1;
   background: #f1f5f9;
   overflow-y: auto;
-  padding: 0;
 }
 
 /* 顶部工具栏 */
@@ -1043,6 +1271,19 @@ function handleLogout() {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+.btn-refresh-top {
+  padding: 7px 16px;
+  background: #eff6ff;
+  color: #3b82f6;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-refresh-top:hover {
+  background: #dbeafe;
 }
 .btn-logout-top {
   padding: 7px 18px;
@@ -1395,6 +1636,14 @@ code { font-family: 'Consolas', monospace; font-size: 13px; background: #f1f5f9;
   margin-bottom: 6px;
 }
 .col-type-hint { font-weight: 400; color: #94a3b8; font-size: 13px; margin-left: 6px; }
+.form-hint {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+}
 .form-input {
   width: 100%;
   padding: 10px 14px;
