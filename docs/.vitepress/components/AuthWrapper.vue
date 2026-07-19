@@ -90,7 +90,7 @@ const login = () => {
     return
   }
 
-  if (username.value === 'admin' && password.value === 'REMOVED') {
+  if (username.value === 'admin' && password.value === '20040821') {
 
     // 保存账号
     localStorage.setItem('last_username', username.value)

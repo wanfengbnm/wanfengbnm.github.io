@@ -19,8 +19,8 @@ const API_SECRET = process.env.API_SECRET || 'change-me';
 
 // === CORS 白名单 ===
 const ALLOWED_ORIGINS = [
-  'https://wanfengbnm.cn',
-  'https://www.wanfengbnm.cn',
+  'https://wybnm.xyz',
+  'https://www.wybnm.xyz',
   'http://localhost:5173',
   'http://localhost:5174',
 ];

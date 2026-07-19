@@ -31,7 +31,7 @@ export default defineConfig({
   },
   metaChunk: true,
   sitemap: {
-    hostname: 'https://wanfengbnm.cn/'
+    hostname: 'https://wybnm.xyz/'
   },
   themeConfig: {
     logo: '/logo.ico',
