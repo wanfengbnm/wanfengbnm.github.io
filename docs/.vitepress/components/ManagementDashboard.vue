@@ -44,12 +44,11 @@
           <div v-if="loadingTables" class="loading-tables">
             加载中...
           </div>
+          <div class="sidebar-new-table" @click="openCreateTable">
+            <span class="table-icon">＋</span>
+            <span class="table-name-text">创建新表</span>
+          </div>
         </nav>
-      </div>
-
-      <!-- 新建表按钮 -->
-      <div class="sidebar-actions">
-        <button class="btn-new-table" @click="openCreateTable">+ 创建表</button>
       </div>
     </aside>
 
@@ -862,8 +861,7 @@ function handleLogout() {
 /* ========== 侧边栏 ========== */
 .mgmt-sidebar {
   width: 260px;
-  height: 100%;
-  min-height: 0;
+  height: calc(100vh - var(--vp-nav-height, 0px));
   overflow: hidden;
   background: #1e293b;
   color: #cbd5e1;
@@ -995,27 +993,23 @@ function handleLogout() {
   color: #64748b;
 }
 
-/* 创建表按钮 */
-.sidebar-actions {
-  flex-shrink: 0;
+/* 内联新建表项 */
+.sidebar-new-table {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 18px;
-  border-top: 1px solid #334155;
-}
-.btn-new-table {
-  width: 100%;
-  padding: 11px;
-  border: 1px dashed #475569;
-  background: transparent;
-  color: #94a3b8;
-  border-radius: 8px;
   cursor: pointer;
   font-size: 15px;
-  transition: all 0.2s;
+  color: #94a3b8;
+  border-left: 3px solid transparent;
+  transition: all 0.15s;
+  border-top: 1px solid #334155;
 }
-.btn-new-table:hover {
-  border-color: #60a5fa;
+.sidebar-new-table:hover {
+  background: #334155;
   color: #60a5fa;
-  background: #1e3a5f;
+  border-left-color: #60a5fa;
 }
 
 /* 侧边栏底部 */
