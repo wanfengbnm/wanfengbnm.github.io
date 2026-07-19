@@ -57,15 +57,15 @@ const errorMsg = ref('')
 
 // 检查登录状态
 const checkLogin = () => {
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('admin_token')
   const expire = localStorage.getItem('expire')
 
-  if (token && expire && Date.now() < expire) {
+  if (token && expire && Date.now() < Number(expire)) {
     // 已登录，直接跳转管理后台
     window.location.href = '/Management/'
     return
   }
-  localStorage.removeItem('token')
+  localStorage.removeItem('admin_token')
   localStorage.removeItem('expire')
   isLogin.value = false
   authReady.value = true
@@ -82,7 +82,7 @@ onMounted(() => {
 })
 
 // 登录
-const login = () => {
+const login = async () => {
   errorMsg.value = ''
 
   if (!username.value || !password.value) {
@@ -90,26 +90,37 @@ const login = () => {
     return
   }
 
-  if (username.value === 'admin' && password.value === '20040821') {
+  // 构造 API 地址
+  const base = window.location.hostname === 'localhost' ? '' : 'https://api.wfbnm.xyz'
+  const url = `${base}/api/auth/login`
 
-    // 保存账号
-    localStorage.setItem('last_username', username.value)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username.value, password: password.value }),
+    })
+    const data = await res.json()
 
-    // 设置登录状态
-    const expireTime = Date.now() + 30 * 60 * 1000
-    localStorage.setItem('token', 'admin-token')
-    localStorage.setItem('expire', expireTime)
+    if (res.ok && data.token) {
+      // 保存账号和 token
+      localStorage.setItem('last_username', username.value)
+      localStorage.setItem('admin_token', data.token)
+      localStorage.setItem('expire', String(Date.now() + 30 * 60 * 1000))
 
-    // 直接跳转管理后台
-    window.location.href = '/Management/'
-  } else {
-    errorMsg.value = '账号或密码错误'
+      // 直接跳转管理后台
+      window.location.href = '/Management/'
+    } else {
+      errorMsg.value = data.message || '账号或密码错误'
+    }
+  } catch (e) {
+    errorMsg.value = '连接服务器失败，请检查网络'
   }
 }
 
 // 退出登录
 const logout = () => {
-  localStorage.removeItem('token')
+  localStorage.removeItem('admin_token')
   localStorage.removeItem('expire')
 
   isLogin.value = false

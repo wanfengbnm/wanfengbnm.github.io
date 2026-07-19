@@ -510,14 +510,16 @@ const apiBase = () => {
 
 const apiUrl = (path) => `${apiBase()}/api/mysql${path}`
 
-const AUTH_TOKEN = 'wanfengbnm-admin-token-2026'
+function getToken() {
+  return localStorage.getItem('admin_token') || ''
+}
 
 function apiFetch(path, opts) {
   return fetch(apiUrl(path), {
     ...opts,
     headers: {
       ...(opts?.headers || {}),
-      'Authorization': `Bearer ${AUTH_TOKEN}`,
+      'Authorization': `Bearer ${getToken()}`,
     },
   })
 }
@@ -545,10 +547,10 @@ const totalRowCount = computed(() => {
 // ====================== 初始化 ======================
 onMounted(async () => {
   // 权限检查
-  const token = localStorage.getItem('token')
+  const token = localStorage.getItem('admin_token')
   const expire = localStorage.getItem('expire')
   if (!token || !expire || Date.now() > Number(expire)) {
-    localStorage.removeItem('token')
+    localStorage.removeItem('admin_token')
     localStorage.removeItem('expire')
     window.location.href = '/TaskLog/'
     return
@@ -957,7 +959,7 @@ async function saveRow() {
   try {
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AUTH_TOKEN}` },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
       body: JSON.stringify(payload),
     })
     const data = await res.json()
@@ -996,7 +998,7 @@ async function doDelete() {
   }
 
   try {
-    const res = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` } })
+    const res = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${getToken()}` } })
     const data = await res.json()
     if (res.ok) {
       showDeleteConfirm.value = false
@@ -1029,7 +1031,7 @@ function formatCell(val) {
 
 // ====================== 导航 ======================
 function handleLogout() {
-  localStorage.removeItem('token')
+  localStorage.removeItem('admin_token')
   localStorage.removeItem('expire')
   window.location.href = '/TaskLog/'
 }

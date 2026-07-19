@@ -7,6 +7,7 @@ import cors from 'cors';
 import mssql from 'mssql';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -52,15 +53,37 @@ function rateLimitCheck(req) {
   return entry.count <= 120;
 }
 
+// === HMAC Token 工具 ===
+const TOKEN_TTL = 30 * 60 * 1000; // 30 分钟
+
+function signToken(payload) {
+  const json = JSON.stringify(payload);
+  const sig = crypto.createHmac('sha256', API_SECRET).update(json).digest('base64url');
+  return Buffer.from(JSON.stringify({ ...payload, sig })).toString('base64url');
+}
+
+function verifyToken(token) {
+  try {
+    const raw = JSON.parse(Buffer.from(token, 'base64url').toString());
+    if (!raw.sig || !raw.exp) return null;
+    if (Date.now() > raw.exp) return null;
+    const expected = crypto.createHmac('sha256', API_SECRET).update(JSON.stringify({ userId: raw.userId, username: raw.username, exp: raw.exp })).digest('base64url');
+    if (expected !== raw.sig) return null;
+    return { userId: raw.userId, username: raw.username };
+  } catch { return null; }
+}
+
 // === Auth 中间件 ===
 function authMiddleware(req, res, next) {
   if (!rateLimitCheck(req)) {
     return res.status(429).json({ message: '请求过于频繁，请稍后再试。' });
   }
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (!token || token !== API_SECRET) {
+  const user = verifyToken(token || '');
+  if (!user) {
     return res.status(401).json({ message: '未授权访问。' });
   }
+  req.user = user;
   next();
 }
 
@@ -397,6 +420,42 @@ app.post('/api/sqlserver/list-databases', async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: `连接服务器失败：${error instanceof Error ? error.message : '连接失败'}` });
   } finally { if (pool) await pool.close().catch(() => {}); }
+});
+
+// ==================== 认证 API（不受 authMiddleware 保护）====================
+
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ message: '请输入账号和密码。' });
+  }
+  try {
+    const [rows] = await mysqlPool.query('SELECT id, name, password, role FROM users WHERE name = ?', [username]);
+    if (rows.length === 0) {
+      return res.status(401).json({ message: '账号或密码错误。' });
+    }
+    const user = rows[0];
+    const ok = await bcrypt.compare(password, user.password);
+    if (!ok) {
+      return res.status(401).json({ message: '账号或密码错误。' });
+    }
+    const token = signToken({
+      userId: user.id,
+      username: user.name,
+      exp: Date.now() + TOKEN_TTL,
+    });
+    res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
+  } catch (e) {
+    res.status(500).json({ message: `登录失败：${e.message}` });
+  }
+});
+
+// 验证 token 是否有效
+app.get('/api/auth/me', async (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const user = verifyToken(token || '');
+  if (!user) return res.status(401).json({ message: '登录已过期。' });
+  res.json({ user });
 });
 
 // ==================== MySQL API (全部受 authMiddleware 保护) ====================
