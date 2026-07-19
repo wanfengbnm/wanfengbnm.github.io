@@ -513,7 +513,7 @@ const apiUrl = (path) => `${apiBase()}/api/mysql${path}`
 const AUTH_TOKEN = 'wanfengbnm-admin-token-2026'
 
 function apiFetch(path, opts) {
-  return apiFetch(path), {
+  return fetch(apiUrl(path), {
     ...opts,
     headers: {
       ...(opts?.headers || {}),
@@ -561,7 +561,7 @@ onMounted(async () => {
 // ====================== 表列表 ======================
 async function fetchDatabases() {
   try {
-    const res = await apiFetch('/databases'))
+    const res = await apiFetch('/databases')
     if (res.ok) {
       const data = await res.json()
       databases.value = data.databases || []
@@ -588,7 +588,7 @@ async function switchDb() {
     if (dbModalUser.value) body.user = dbModalUser.value
     if (dbModalPass.value) body.password = dbModalPass.value
 
-    const res = await apiFetch('/use-database'), {
+    const res = await apiFetch('/use-database', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -611,7 +611,7 @@ async function fetchTables() {
   loadingTables.value = true
   dbStatus.value = 'connecting'
   try {
-    const res = await apiFetch('/tables'))
+    const res = await apiFetch('/tables')
     if (res.ok) {
       const data = await res.json()
       tables.value = data.tables || []
@@ -652,7 +652,7 @@ function selectTable(name) {
 
 async function fetchTableStructure() {
   try {
-    const res = await apiFetch(`/tables/${selectedTable.value}`))
+    const res = await apiFetch(`/tables/${selectedTable.value}`)
     if (res.ok) {
       const data = await res.json()
       tableStructure.value = data.columns
@@ -673,7 +673,7 @@ async function fetchTableData() {
       orderBy: sortBy.value,
       orderDir: sortDir.value,
     })
-    const res = await apiFetch(`/tables/${selectedTable.value}/rows?${params}`))
+    const res = await apiFetch(`/tables/${selectedTable.value}/rows?${params}`)
     if (res.ok) {
       const data = await res.json()
       tableRows.value = data.rows
@@ -723,7 +723,7 @@ async function runSql() {
   sqlResult.value = null
 
   try {
-    const res = await apiFetch('/query'), {
+    const res = await apiFetch('/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql: sqlQuery.value }),
@@ -750,7 +750,7 @@ async function runTableSql() {
   sqlResult.value = null
 
   try {
-    const res = await apiFetch('/query'), {
+    const res = await apiFetch('/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sql: tableSqlQuery.value }),
@@ -804,7 +804,7 @@ async function createTable() {
   modalError.value = ''
 
   try {
-    const res = await apiFetch('/tables'), {
+    const res = await apiFetch('/tables', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -847,7 +847,7 @@ async function createColumn() {
   addingColumn.value = true
   modalError.value = ''
   try {
-    const res = await apiFetch(`/tables/${selectedTable.value}/columns`), {
+    const res = await apiFetch(`/tables/${selectedTable.value}/columns`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -902,7 +902,7 @@ async function renumberIds() {
   if (!confirm(`确定要重新编号 "${selectedTable.value}" 的 ID 字段吗？`)) return
   renumbering.value = true
   try {
-    const res = await apiFetch(`/tables/${selectedTable.value}/renumber-ids`), { method: 'POST' })
+    const res = await apiFetch(`/tables/${selectedTable.value}/renumber-ids`, { method: 'POST' })
     const data = await res.json()
     if (res.ok) {
       fetchTableData()
@@ -957,7 +957,7 @@ async function saveRow() {
   try {
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AUTH_TOKEN}` },
       body: JSON.stringify(payload),
     })
     const data = await res.json()
@@ -996,7 +996,7 @@ async function doDelete() {
   }
 
   try {
-    const res = await fetch(url, { method: 'DELETE' })
+    const res = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${AUTH_TOKEN}` } })
     const data = await res.json()
     if (res.ok) {
       showDeleteConfirm.value = false
