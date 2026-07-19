@@ -18,6 +18,10 @@ export default defineConfig({
     ['link',
       { rel: 'icon', href: '/logo.ico' }
     ],
+    ['meta', {
+      'http-equiv': 'Content-Security-Policy',
+      content: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://api.wfbnm.xyz http://localhost:*; img-src 'self' data: https:; font-src 'self' data:;"
+    }],
   ],
   markdown: {
     lineNumbers: true,
