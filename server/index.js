@@ -24,6 +24,8 @@ const API_SECRET = process.env.API_SECRET || 'change-me';
 const ALLOWED_ORIGINS = [
   'https://wybnm.xyz',
   'https://www.wybnm.xyz',
+  'https://wfbnm.xyz',
+  'https://www.wfbnm.xyz',
   'http://localhost:5173',
   'http://localhost:5174',
 ];

@@ -20,7 +20,7 @@ export default defineConfig({
     ],
     ['meta', {
       'http-equiv': 'Content-Security-Policy',
-      content: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://api.wfbnm.xyz http://localhost:*; img-src 'self' data: https:; font-src 'self' data:;"
+      content: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://api.wfbnm.xyz http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; img-src 'self' data: https:; font-src 'self' data:;"
     }],
   ],
   markdown: {
@@ -35,7 +35,7 @@ export default defineConfig({
   },
   metaChunk: true,
   sitemap: {
-    hostname: 'https://wybnm.xyz/'
+    hostname: 'https://wfbnm.xyz/'
   },
   themeConfig: {
     logo: '/logo.ico',
