@@ -468,7 +468,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+
+// 管理页挂载期间给 body 打标记以隐藏 VitePress 页脚；卸载即移除，避免全局样式泄漏
+const BODY_FLAG = 'dbm-dashboard-active'
 
 // ====================== 状态 ======================
 const authReady = ref(false)
@@ -652,6 +655,7 @@ const totalRowCount = computed(() => {
 
 // ====================== 初始化 ======================
 onMounted(async () => {
+  document.body.classList.add(BODY_FLAG)
   // 权限检查
   const token = localStorage.getItem('admin_token')
   const expire = localStorage.getItem('expire')
@@ -665,6 +669,10 @@ onMounted(async () => {
   await fetchDatabases()
   fetchTables()
   fetchMeta()
+})
+
+onUnmounted(() => {
+  document.body.classList.remove(BODY_FLAG)
 })
 
 // ====================== 表列表 ======================
@@ -1207,8 +1215,8 @@ function handleLogout() {
 </script>
 
 <style scoped>
-/* 隐藏 VitePress 底部 footer */
-:global(.VPFooter) { display: none !important; }
+/* 仅在 body 带有管理页标记时隐藏 VitePress 底部 footer（样式泄漏安全） */
+:global(body.dbm-dashboard-active .VPFooter) { display: none !important; }
 
 /* ========== 容器布局 ========== */
 .mgmt-container {
