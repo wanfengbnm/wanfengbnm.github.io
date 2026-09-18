@@ -8,6 +8,10 @@ import mssql from 'mssql';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import {
+  isSafeIdent, backtick, STRICT_IDENT_RE, isValidColumnType, sqlDefaultLiteral,
+  splitStatements, findForbiddenKeyword, csvField,
+} from './sql-utils.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -51,6 +55,18 @@ function rateLimitCheck(req) {
   entry.count++;
   rateLimitMap.set(ip, entry);
   return entry.count <= 120;
+}
+
+// 登录接口独立限流（防爆破）
+const loginRateMap = new Map();
+function loginRateCheck(req) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = loginRateMap.get(ip) || { count: 0, reset: now + 60000 };
+  if (now > entry.reset) { entry.count = 0; entry.reset = now + 60000; }
+  entry.count++;
+  loginRateMap.set(ip, entry);
+  return entry.count <= 10;
 }
 
 // === HMAC Token 工具 ===
@@ -109,32 +125,74 @@ function clearCache(prefix) {
     queryCache.clear();
   }
 }
-
-// === MySQL 连接池 — 动态切换 ===
-let currentDb = MYSQL_DB;
-const dbCredentials = new Map();
-
-function createPoolForDb(database, user, password) {
-  return mysql.createPool({
-    host: MYSQL_HOST, port: MYSQL_PORT, database,
-    user: user || MYSQL_USER, password: password || MYSQL_PASS,
-    charset: 'utf8mb4', waitForConnections: true, connectionLimit: 4,
-    queueLimit: 0, connectTimeout: 15000,
-  });
+// 清空指定数据库的缓存（缓存键以 "库名:" 开头）
+function clearDbCache(dbName) {
+  clearCache(`${dbName}:`);
 }
 
-let mysqlPool = createPoolForDb(currentDb, MYSQL_USER, MYSQL_PASS);
+// === MySQL 连接池 — 按库缓存，支持多个客户端/终端并发使用不同数据库 ===
+// 每个请求通过 X-Database 头指定目标库，从缓存取对应连接池，
+// 不再有全局 "当前数据库"，各端互不干扰。
+const dbCredentials = new Map(); // database -> { user, password }（切换弹窗提供的自定义凭据）
+const poolCache = new Map();     // `${database}::${user}` -> { pool, db, lastUsed }
 
-function switchDatabase(database, user, password) {
-  const oldPool = mysqlPool;
-  const u = user || dbCredentials.get(database)?.user || MYSQL_USER;
-  const p = password || dbCredentials.get(database)?.password || MYSQL_PASS;
-  mysqlPool = createPoolForDb(database, u, p);
-  currentDb = database;
-  if (user || password) dbCredentials.set(database, { user: u, password: p });
-  oldPool.end().catch(() => {});
-  clearCache();
+function resolveCreds(database) {
+  const c = dbCredentials.get(database);
+  return { user: c?.user || MYSQL_USER, password: c?.password || MYSQL_PASS };
 }
+
+function getPool(database) {
+  const { user, password } = resolveCreds(database);
+  const key = `${database}::${user}`;
+  let entry = poolCache.get(key);
+  if (!entry) {
+    entry = {
+      db: database,
+      lastUsed: Date.now(),
+      pool: mysql.createPool({
+        host: MYSQL_HOST, port: MYSQL_PORT, database,
+        user, password,
+        charset: 'utf8mb4', waitForConnections: true, connectionLimit: 4,
+        queueLimit: 0, connectTimeout: 15000,
+      }),
+    };
+    poolCache.set(key, entry);
+  }
+  entry.lastUsed = Date.now();
+  return entry.pool;
+}
+
+function dropPoolsForDb(database) {
+  for (const [key, entry] of poolCache) {
+    if (entry.db === database) {
+      poolCache.delete(key);
+      entry.pool.end().catch(() => {});
+    }
+  }
+}
+
+// 定时清理：过期限流计数、过期缓存、空闲超过 15 分钟的连接池
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitMap) if (now > entry.reset) rateLimitMap.delete(ip);
+  for (const [ip, entry] of loginRateMap) if (now > entry.reset) loginRateMap.delete(ip);
+  for (const [k, entry] of queryCache) if (now - entry.time >= CACHE_TTL) queryCache.delete(k);
+  for (const [key, entry] of poolCache) {
+    if (now - entry.lastUsed > 15 * 60 * 1000) {
+      poolCache.delete(key);
+      entry.pool.end().catch(() => {});
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
+// 每个请求解析目标数据库（X-Database 头，未指定时用默认库）
+app.use('/api/mysql', (req, res, next) => {
+  const db = String(req.headers['x-database'] || MYSQL_DB);
+  if (!isSafeIdent(db)) return res.status(400).json({ message: `数据库名 "${db}" 不合法。` });
+  req.dbName = db;
+  req.dbPool = getPool(db);
+  next();
+});
 
 const safeId = (name) => `[${String(name).replace(/]/g, '')}]`;
 
@@ -425,12 +483,15 @@ app.post('/api/sqlserver/list-databases', async (req, res) => {
 // ==================== 认证 API（不受 authMiddleware 保护）====================
 
 app.post('/api/auth/login', async (req, res) => {
+  if (!loginRateCheck(req)) {
+    return res.status(429).json({ message: '尝试次数过多，请一分钟后再试。' });
+  }
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ message: '请输入账号和密码。' });
   }
   try {
-    const [rows] = await mysqlPool.query('SELECT id, name, password, role FROM users WHERE name = ?', [username]);
+    const [rows] = await getPool(MYSQL_DB).query('SELECT id, name, password, role FROM users WHERE name = ?', [username]);
     if (rows.length === 0) {
       return res.status(401).json({ message: '账号或密码错误。' });
     }
@@ -458,39 +519,69 @@ app.get('/api/auth/me', async (req, res) => {
   res.json({ user });
 });
 
+// 滑动续期：token 仍有效时签发新 token，前端在临近过期时自动调用
+app.post('/api/auth/refresh', (req, res) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  const user = verifyToken(token || '');
+  if (!user) return res.status(401).json({ message: '登录已过期，请重新登录。' });
+  res.json({ token: signToken({ userId: user.userId, username: user.username, exp: Date.now() + TOKEN_TTL }) });
+});
+
 // ==================== MySQL API (全部受 authMiddleware 保护) ====================
 
 app.get('/api/mysql/databases', async (_req, res) => {
   try {
-    const [rows] = await mysqlPool.query('SHOW DATABASES');
+    const [rows] = await getPool(MYSQL_DB).query('SHOW DATABASES');
     const dbs = rows.map((r) => Object.values(r)[0])
       .filter((db) => !['information_schema','performance_schema','mysql','sys'].includes(db));
-    res.json({ databases: dbs, current: currentDb });
+    res.json({ databases: dbs, current: MYSQL_DB });
   } catch (e) { res.status(500).json({ message: `获取数据库列表失败：${e.message}` }); }
 });
 
+// 校验目标库连通性并登记自定义凭据；实际连接由每个请求的 X-Database 头决定
 app.post('/api/mysql/use-database', async (req, res) => {
   const { database, user, password } = req.body || {};
-  if (!database) return res.status(400).json({ message: '请提供数据库名。' });
+  if (!isSafeIdent(database)) return res.status(400).json({ message: `数据库名 "${database}" 不合法。` });
+  const creds = resolveCreds(database);
+  let testPool;
   try {
-    switchDatabase(database, user, password);
-    await mysqlPool.query('SELECT 1');
-    clearCache();
-    res.json({ message: `已切换到数据库 ${database}。`, current: currentDb });
-  } catch (e) { res.status(500).json({ message: `切换数据库失败：${e.message}` }); }
+    testPool = mysql.createPool({
+      host: MYSQL_HOST, port: MYSQL_PORT, database,
+      user: user || creds.user, password: password || creds.password,
+      charset: 'utf8mb4', connectionLimit: 1, connectTimeout: 8000,
+    });
+    await testPool.query('SELECT 1');
+    if (user || password) {
+      dbCredentials.set(database, { user: user || creds.user, password: password || creds.password });
+      dropPoolsForDb(database);
+    }
+    res.json({ message: `数据库 ${database} 可用。`, current: database });
+  } catch (e) {
+    res.status(500).json({ message: `切换数据库失败：${e.message}` });
+  } finally { if (testPool) await testPool.end().catch(() => {}); }
 });
 
-app.get('/api/mysql/tables', async (_req, res) => {
-  const cacheKey = 'tables_list';
+// 当前数据库的元信息（版本号等）
+app.get('/api/mysql/meta', async (req, res) => {
+  try {
+    const [[row]] = await req.dbPool.query('SELECT VERSION() AS version');
+    res.json({ version: row.version, database: req.dbName });
+  } catch (e) { res.status(500).json({ message: `获取元信息失败：${e.message}` }); }
+});
+
+app.get('/api/mysql/tables', async (req, res) => {
+  const cacheKey = `${req.dbName}:tables_list`;
   const cached = getCached(cacheKey);
   if (cached) return res.json(cached);
   try {
-    const [tables] = await mysqlPool.query('SHOW TABLES');
+    const [tables] = await req.dbPool.query('SHOW TABLES');
     const tableKey = Object.keys(tables[0] || {})[0] || 'Tables_in_mysql_mulpro';
     const result = [];
     for (const row of tables) {
       const name = row[tableKey];
-      try { const [c] = await mysqlPool.query(`SELECT COUNT(*) AS cnt FROM \`${name}\``); result.push({ name, rowCount: c[0].cnt }); }
+      const tName = backtick(name);
+      if (!tName) { result.push({ name, rowCount: 0 }); continue; }
+      try { const [c] = await req.dbPool.query(`SELECT COUNT(*) AS cnt FROM ${tName}`); result.push({ name, rowCount: c[0].cnt }); }
       catch { result.push({ name, rowCount: 0 }); }
     }
     const data = { tables: result };
@@ -500,14 +591,16 @@ app.get('/api/mysql/tables', async (_req, res) => {
 });
 
 app.post('/api/mysql/tables/:name/columns', async (req, res) => {
-  const { name } = req.params;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   const { colName, colType, nullable, defaultValue } = req.body || {};
-  if (!colName || !colType) return res.status(400).json({ message: '请提供列名和类型。' });
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(colName)) return res.status(400).json({ message: `列名 "${colName}" 不合法。` });
-  let def = `ADD COLUMN \`${colName}\` ${colType}`;
+  if (!STRICT_IDENT_RE.test(colName || '')) return res.status(400).json({ message: `列名 "${colName}" 不合法。` });
+  if (!isValidColumnType(colType)) return res.status(400).json({ message: `列类型 "${colType}" 不受支持，请使用 INT、VARCHAR(n)、DECIMAL(m,d) 等标准类型。` });
+  const cName = backtick(colName);
+  let def = `ADD COLUMN ${cName} ${colType.trim().toUpperCase()}`;
   if (!nullable) def += ' NOT NULL';
   if (defaultValue !== undefined && defaultValue !== null && defaultValue !== '') {
-    def += ` DEFAULT ${typeof defaultValue === 'string' ? `'${defaultValue}'` : defaultValue}`;
+    def += ` DEFAULT ${sqlDefaultLiteral(defaultValue)}`;
   } else if (!nullable) {
     const t = colType.toUpperCase();
     if (/INT|DECIMAL|FLOAT|DOUBLE|NUMERIC/.test(t)) def += ' DEFAULT 0';
@@ -516,18 +609,36 @@ app.post('/api/mysql/tables/:name/columns', async (req, res) => {
     else def += " DEFAULT ''";
   }
   try {
-    await mysqlPool.query(`ALTER TABLE \`${name}\` ${def}`);
-    clearCache('tables_');
-    res.json({ message: `列 ${colName} 已添加到表 ${name}。` });
+    await req.dbPool.query(`ALTER TABLE ${tName} ${def}`);
+    clearDbCache(req.dbName);
+    res.json({ message: `列 ${colName} 已添加到表 ${req.params.name}。` });
   } catch (e) { res.status(500).json({ message: `添加列失败：${e.message}` }); }
 });
 
+app.delete('/api/mysql/tables/:name/columns/:col', async (req, res) => {
+  const tName = backtick(req.params.name);
+  const cName = backtick(req.params.col);
+  if (!tName || !cName) return res.status(400).json({ message: '表名或列名不合法。' });
+  try {
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+    const target = cols.find((c) => c.Field === req.params.col);
+    if (!target) return res.status(400).json({ message: `列 "${req.params.col}" 不存在。` });
+    if (target.Key === 'PRI') return res.status(400).json({ message: '主键列不允许删除。' });
+    if (cols.length <= 1) return res.status(400).json({ message: '表至少需要保留一列。' });
+    await req.dbPool.query(`ALTER TABLE ${tName} DROP COLUMN ${cName}`);
+    clearDbCache(req.dbName);
+    res.json({ message: `列 ${req.params.col} 已删除。` });
+  } catch (e) { res.status(500).json({ message: `删除列失败：${e.message}` }); }
+});
+
 app.get('/api/mysql/tables/:name', async (req, res) => {
-  const cacheKey = `tables_struct:${req.params.name}`;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
+  const cacheKey = `${req.dbName}:tables_struct:${req.params.name}`;
   const cached = getCached(cacheKey);
   if (cached) return res.json(cached);
   try {
-    const [cols] = await mysqlPool.query(`DESCRIBE \`${req.params.name}\``);
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
     const data = {
       tableName: req.params.name,
       columns: cols.map((c) => ({ name: c.Field, type: c.Type, nullable: c.Null === 'YES', key: c.Key || null, default: c.Default, extra: c.Extra || null })),
@@ -539,128 +650,184 @@ app.get('/api/mysql/tables/:name', async (req, res) => {
 
 app.post('/api/mysql/tables', async (req, res) => {
   const { name, columns } = req.body || {};
-  if (!name || !Array.isArray(columns) || columns.length === 0) return res.status(400).json({ message: '请提供表名和至少一列的定义。' });
-  const re = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
-  for (const col of columns) { if (!re.test(col.name)) return res.status(400).json({ message: `列名 "${col.name}" 不合法。` }); }
+  const tName = backtick(name || '');
+  if (!tName) return res.status(400).json({ message: `表名 "${name}" 不合法。` });
+  if (!Array.isArray(columns) || columns.length === 0) return res.status(400).json({ message: '请提供表名和至少一列的定义。' });
+  for (const col of columns) {
+    if (!STRICT_IDENT_RE.test(col.name || '')) return res.status(400).json({ message: `列名 "${col.name}" 不合法。` });
+    if (!isValidColumnType(col.type)) return res.status(400).json({ message: `列类型 "${col.type}" 不受支持，请使用 INT、VARCHAR(n)、DECIMAL(m,d) 等标准类型。` });
+  }
   const colDefs = columns.map((col) => {
-    let d = `\`${col.name}\` ${col.type}`;
+    let d = `${backtick(col.name)} ${col.type.trim().toUpperCase()}`;
     if (!col.nullable) d += ' NOT NULL';
-    if (col.default !== undefined && col.default !== null && col.default !== '') d += ` DEFAULT ${typeof col.default === 'string' && col.default.toUpperCase() !== 'CURRENT_TIMESTAMP' ? `'${col.default}'` : col.default}`;
+    if (col.default !== undefined && col.default !== null && col.default !== '') d += ` DEFAULT ${sqlDefaultLiteral(col.default)}`;
     if (col.autoInc) d += ' AUTO_INCREMENT';
     if (col.pk) d += ' PRIMARY KEY';
     return d;
   });
   try {
-    await mysqlPool.query(`CREATE TABLE \`${name}\` (${colDefs.join(', ')})`);
-    clearCache('tables_');
+    await req.dbPool.query(`CREATE TABLE ${tName} (${colDefs.join(', ')})`);
+    clearDbCache(req.dbName);
     res.json({ message: `表 ${name} 创建成功。` });
   } catch (e) { res.status(500).json({ message: `创建表失败：${e.message}` }); }
 });
 
 app.post('/api/mysql/tables/:name/renumber-ids', async (req, res) => {
-  const { name } = req.params;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   try {
-    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
     const pkCol = cols.find((c) => c.Key === 'PRI');
     if (!pkCol || !pkCol.Extra?.includes('auto_increment')) return res.status(400).json({ message: '该表没有自增主键，无法重新编号。' });
-    const pk = pkCol.Field;
-    await mysqlPool.query(`SET @num = 0`);
-    await mysqlPool.query(`UPDATE \`${name}\` SET \`${pk}\` = @num := @num + 1 ORDER BY \`${pk}\``);
-    const [mx] = await mysqlPool.query(`SELECT MAX(\`${pk}\`) AS max_id FROM \`${name}\``);
-    const next = (mx[0].max_id || 0) + 1;
-    await mysqlPool.query(`ALTER TABLE \`${name}\` AUTO_INCREMENT = ${next}`);
-    clearCache('tables_');
+    const pk = backtick(pkCol.Field);
+    await req.dbPool.query(`SET @num = 0`);
+    await req.dbPool.query(`UPDATE ${tName} SET ${pk} = @num := @num + 1 ORDER BY ${pk}`);
+    const [mx] = await req.dbPool.query(`SELECT MAX(${pk}) AS max_id FROM ${tName}`);
+    const next = Number(mx[0].max_id || 0) + 1;
+    await req.dbPool.query(`ALTER TABLE ${tName} AUTO_INCREMENT = ${next}`);
+    clearDbCache(req.dbName);
     res.json({ message: `ID 重新编号完成，下次插入起始: ${next}。` });
   } catch (e) { res.status(500).json({ message: `重新编号失败：${e.message}` }); }
 });
 
 app.delete('/api/mysql/tables/:name', async (req, res) => {
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   try {
-    await mysqlPool.query(`DROP TABLE IF EXISTS \`${req.params.name}\``);
-    clearCache('tables_');
+    await req.dbPool.query(`DROP TABLE IF EXISTS ${tName}`);
+    clearDbCache(req.dbName);
     res.json({ message: `表 ${req.params.name} 已删除。` });
   } catch (e) { res.status(500).json({ message: `删除表失败：${e.message}` }); }
 });
 
+// 根据列元数据构建 WHERE/ORDER 子句（rows 查询与 CSV 导出共用）
+function buildRowQueryClauses(cols, search, orderBy, orderDir) {
+  const stringCols = cols.filter((c) => ['varchar','char','text','longtext','mediumtext','tinytext'].some((t) => c.Type.toLowerCase().includes(t)));
+  let where = '', params = [];
+  if (search && stringCols.length > 0) {
+    where = `WHERE (${stringCols.map((c) => `\`${c.Field}\` LIKE ?`).join(' OR ')})`;
+    for (let i = 0; i < stringCols.length; i++) params.push(`%${search}%`);
+  }
+  const pkCol = cols.find((c) => c.Key === 'PRI')?.Field || cols[0]?.Field;
+  let orderClause = '';
+  if (orderBy && cols.some((c) => c.Field === orderBy)) orderClause = `ORDER BY \`${orderBy}\` ${orderDir}`;
+  else if (pkCol) orderClause = `ORDER BY \`${pkCol}\` DESC`;
+  return { where, params, orderClause };
+}
+
 app.get('/api/mysql/tables/:name/rows', async (req, res) => {
-  const { name } = req.params;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize) || 20));
   const search = req.query.search || '', orderBy = req.query.orderBy || '';
   const orderDir = req.query.orderDir === 'asc' ? 'ASC' : 'DESC';
   const offset = (page - 1) * pageSize;
   try {
-    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
-    const pkCol = cols.find((c) => c.Key === 'PRI')?.Field || cols[0]?.Field;
-    const stringCols = cols.filter((c) => ['varchar','char','text','longtext','mediumtext','tinytext'].some((t) => c.Type.toLowerCase().includes(t)));
-    let where = '', params = [];
-    if (search && stringCols.length > 0) {
-      where = `WHERE (${stringCols.map((c) => `\`${c.Field}\` LIKE ?`).join(' OR ')})`;
-      for (let i = 0; i < stringCols.length; i++) params.push(`%${search}%`);
-    }
-    const [[{ total }]] = await mysqlPool.query(`SELECT COUNT(*) AS total FROM \`${name}\` ${where}`, params);
-    let orderClause = '';
-    if (orderBy && cols.some((c) => c.Field === orderBy)) orderClause = `ORDER BY \`${orderBy}\` ${orderDir}`;
-    else if (pkCol) orderClause = `ORDER BY \`${pkCol}\` DESC`;
-    const [rows] = await mysqlPool.query(`SELECT * FROM \`${name}\` ${where} ${orderClause} LIMIT ? OFFSET ?`, [...params, pageSize, offset]);
-    res.json({ tableName: name, columns: cols.map((c) => ({ name: c.Field, type: c.Type, key: c.Key || null })), rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+    const { where, params, orderClause } = buildRowQueryClauses(cols, search, orderBy, orderDir);
+    const [[{ total }]] = await req.dbPool.query(`SELECT COUNT(*) AS total FROM ${tName} ${where}`, params);
+    const [rows] = await req.dbPool.query(`SELECT * FROM ${tName} ${where} ${orderClause} LIMIT ? OFFSET ?`, [...params, pageSize, offset]);
+    res.json({ tableName: req.params.name, columns: cols.map((c) => ({ name: c.Field, type: c.Type, key: c.Key || null })), rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) });
   } catch (e) { res.status(500).json({ message: `查询数据失败：${e.message}` }); }
 });
 
+// 导出当前表为 CSV（沿用搜索与排序条件，最多 5000 行）
+app.get('/api/mysql/tables/:name/export', async (req, res) => {
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
+  const search = req.query.search || '', orderBy = req.query.orderBy || '';
+  const orderDir = req.query.orderDir === 'asc' ? 'ASC' : 'DESC';
+  try {
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+    const { where, params, orderClause } = buildRowQueryClauses(cols, search, orderBy, orderDir);
+    const [rows] = await req.dbPool.query(`SELECT * FROM ${tName} ${where} ${orderClause} LIMIT 5000`, params);
+    const fields = cols.map((c) => c.Field);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="export.csv"; filename*=UTF-8''${encodeURIComponent(req.params.name)}.csv`);
+    res.write('\uFEFF');
+    res.write(fields.map(csvField).join(',') + '\r\n');
+    for (const row of rows) res.write(fields.map((f) => csvField(row[f])).join(',') + '\r\n');
+    res.end();
+  } catch (e) { res.status(500).json({ message: `导出失败：${e.message}` }); }
+});
+
+// 校验并整理插入/更新数据：password_plain 转为 bcrypt 哈希，列名必须真实存在
+async function prepareRowData(req, tName, data) {
+  const clean = { ...data };
+  if (clean.password_plain !== undefined) {
+    if (clean.password_plain !== '') clean.password = await bcrypt.hash(clean.password_plain, 10);
+    delete clean.password_plain;
+  }
+  const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+  const validCols = new Set(cols.map((c) => c.Field));
+  for (const k of Object.keys(clean)) {
+    if (!validCols.has(k)) throw new Error(`未知列 "${k}"。`);
+  }
+  return { clean, cols };
+}
+
 app.post('/api/mysql/tables/:name/rows', async (req, res) => {
-  const { name } = req.params;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   const data = { ...req.body || {} };
   if (Object.keys(data).length === 0) return res.status(400).json({ message: '请提供要插入的数据。' });
-  if (data.password_plain && data.password_plain !== '') data.password = await bcrypt.hash(data.password_plain, 10);
-  const keys = Object.keys(data), vals = Object.values(data);
   try {
-    const [r] = await mysqlPool.query(`INSERT INTO \`${name}\` (${keys.map((k) => `\`${k}\``).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, vals);
-    clearCache('tables_list');
+    const { clean } = await prepareRowData(req, tName, data);
+    const keys = Object.keys(clean);
+    if (keys.length === 0) return res.status(400).json({ message: '请提供要插入的数据。' });
+    const [r] = await req.dbPool.query(`INSERT INTO ${tName} (${keys.map((k) => backtick(k)).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, Object.values(clean));
+    clearDbCache(req.dbName);
     res.json({ message: '插入成功。', insertId: r.insertId });
   } catch (e) { res.status(500).json({ message: `插入数据失败：${e.message}` }); }
 });
 
 app.put('/api/mysql/tables/:name/rows/:id', async (req, res) => {
-  const { name, id } = req.params;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   const data = { ...req.body || {} };
   if (Object.keys(data).length === 0) return res.status(400).json({ message: '请提供要更新的数据。' });
-  if (data.password_plain && data.password_plain !== '') data.password = await bcrypt.hash(data.password_plain, 10);
   try {
-    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const { clean, cols } = await prepareRowData(req, tName, data);
+    if (Object.keys(clean).length === 0) return res.status(400).json({ message: '请提供要更新的数据。' });
     const pkCol = cols.find((c) => c.Key === 'PRI')?.Field;
     if (!pkCol) return res.status(400).json({ message: '该表没有主键，无法通过 ID 更新。' });
-    const setClauses = Object.keys(data).map((k) => `\`${k}\` = ?`).join(', ');
-    const [r] = await mysqlPool.query(`UPDATE \`${name}\` SET ${setClauses} WHERE \`${pkCol}\` = ?`, [...Object.values(data), id]);
+    const setClauses = Object.keys(clean).map((k) => `${backtick(k)} = ?`).join(', ');
+    const [r] = await req.dbPool.query(`UPDATE ${tName} SET ${setClauses} WHERE ${backtick(pkCol)} = ?`, [...Object.values(clean), req.params.id]);
     res.json({ message: '更新成功。', affectedRows: r.affectedRows });
   } catch (e) { res.status(500).json({ message: `更新数据失败：${e.message}` }); }
 });
 
 app.delete('/api/mysql/tables/:name/rows/:id', async (req, res) => {
-  const { name, id } = req.params;
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
   try {
-    const [cols] = await mysqlPool.query(`DESCRIBE \`${name}\``);
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
     const pkCol = cols.find((c) => c.Key === 'PRI')?.Field;
     if (!pkCol) return res.status(400).json({ message: '该表没有主键，无法通过 ID 删除。' });
-    const [r] = await mysqlPool.query(`DELETE FROM \`${name}\` WHERE \`${pkCol}\` = ?`, [id]);
+    const [r] = await req.dbPool.query(`DELETE FROM ${tName} WHERE ${backtick(pkCol)} = ?`, [req.params.id]);
     res.json({ message: '删除成功。', affectedRows: r.affectedRows });
   } catch (e) { res.status(500).json({ message: `删除数据失败：${e.message}` }); }
 });
 
+const FORBIDDEN_KEYWORDS = ['DROP DATABASE', 'TRUNCATE', 'ALTER DATABASE'];
+
 app.post('/api/mysql/query', async (req, res) => {
   const { sql } = req.body || {};
   if (!sql || typeof sql !== 'string') return res.status(400).json({ message: '请提供 SQL 语句。' });
-  const upper = sql.trim().toUpperCase();
-  for (const kw of ['DROP DATABASE', 'TRUNCATE', 'ALTER DATABASE']) if (upper.includes(kw)) return res.status(403).json({ message: `禁止执行包含 ${kw} 的语句。` });
-  const stmts = sql.split(';').filter((s) => s.trim().length > 0);
+  // 词法分析：字符串/注释里的分号与关键字不会误判
+  const stmts = splitStatements(sql);
   if (stmts.length > 1) return res.status(403).json({ message: '禁止执行多条 SQL 语句。' });
+  const forbidden = findForbiddenKeyword(sql, FORBIDDEN_KEYWORDS);
+  if (forbidden) return res.status(403).json({ message: `禁止执行包含 ${forbidden} 的语句。` });
   try {
-    const [rows, fields] = await mysqlPool.query(sql);
+    const [rows, fields] = await req.dbPool.query(sql);
     if (Array.isArray(rows)) {
       res.json({ type: 'result', columns: fields ? fields.map((f) => f.name) : [], rows, rowCount: rows.length });
     } else {
       res.json({ type: 'affected', affectedRows: rows.affectedRows || 0, insertId: rows.insertId || 0, message: `操作成功，影响 ${rows.affectedRows || 0} 行。` });
     }
-    clearCache('tables_');
+    clearDbCache(req.dbName);
   } catch (e) { res.status(500).json({ message: `SQL 执行失败：${e.message}` }); }
 });
 

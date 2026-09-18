@@ -28,6 +28,9 @@
           <span class="section-title">数据表</span>
           <span class="section-count" v-if="tables.length">{{ tables.length }}</span>
         </div>
+        <div class="table-filter-wrap" v-if="tables.length > 5">
+          <input v-model="tableFilter" class="table-filter" placeholder="🔍 筛选表..." />
+        </div>
         <nav class="table-list">
           <!-- 总览入口 -->
           <div class="table-item overview-item" :class="{ active: !selectedTable }" @click="selectTable('')">
@@ -35,7 +38,7 @@
             <span class="table-name-text">总览</span>
           </div>
           <div
-            v-for="t in tables"
+            v-for="t in filteredTables"
             :key="t.name"
             class="table-item"
             :class="{ active: selectedTable === t.name }"
@@ -81,9 +84,22 @@
           <textarea
             v-model="sqlQuery"
             class="sql-editor"
-            placeholder="输入 SQL 语句…&#10;例如：CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(255))"
+            placeholder="输入 SQL 语句…（Ctrl+Enter 执行）&#10;例如：CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(255))"
             rows="5"
+            @keydown.ctrl.enter.prevent="runSql"
+            @keydown.meta.enter.prevent="runSql"
           ></textarea>
+          <div v-if="sqlHistory.length" class="sql-history">
+            <span class="sql-history-label">🕘 历史</span>
+            <button
+              v-for="(h, hi) in sqlHistory.slice(0, 8)"
+              :key="hi"
+              class="sql-history-chip"
+              :title="h"
+              @click="sqlQuery = h"
+            >{{ sqlHistorySnippet(h) }}</button>
+            <button class="sql-history-clear" @click="clearSqlHistory">清空</button>
+          </div>
           <div class="sql-actions">
             <button class="btn-run" @click="runSql" :disabled="runningSql">
               {{ runningSql ? '执行中...' : '▶ 执行' }}
@@ -133,7 +149,7 @@
           </div>
           <div class="overview-card">
             <div class="ov-icon">🏷️</div>
-            <div class="ov-value">MySQL 8.0</div>
+            <div class="ov-value">{{ dbVersion || '—' }}</div>
             <div class="ov-label">数据库版本</div>
           </div>
         </div>
@@ -166,7 +182,16 @@
               placeholder="搜索..."
               @input="onSearchInput"
             />
+            <select v-model.number="pageSize" class="page-size-select" @change="onPageSizeChange" title="每页行数">
+              <option :value="20">20 条/页</option>
+              <option :value="50">50 条/页</option>
+              <option :value="100">100 条/页</option>
+              <option :value="200">200 条/页</option>
+            </select>
             <button class="btn-primary" @click="openInsertRow">+ 新增行</button>
+            <button class="btn-secondary" @click="exportCsv" :disabled="exporting">
+              {{ exporting ? '导出中...' : '⬇ 导出 CSV' }}
+            </button>
             <button class="btn-secondary" @click="renumberIds" :disabled="renumbering">
               {{ renumbering ? '处理中...' : '↻ 重新编号ID' }}
             </button>
@@ -225,6 +250,7 @@
                   <th>键</th>
                   <th>默认值</th>
                   <th>额外</th>
+                  <th class="th-actions">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -235,6 +261,14 @@
                   <td><span v-if="col.key" class="key-badge">{{ col.key }}</span></td>
                   <td>{{ col.default ?? 'NULL' }}</td>
                   <td>{{ col.extra || '—' }}</td>
+                  <td class="td-actions">
+                    <button
+                      v-if="col.key !== 'PRI' && tableStructure.length > 1"
+                      class="btn-sm btn-del"
+                      @click="confirmDropColumn(col)"
+                    >删除</button>
+                    <span v-else class="col-locked">—</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -248,6 +282,9 @@
               v-model="tableSqlQuery"
               class="sql-editor"
               rows="4"
+              placeholder="输入 SQL 语句…（Ctrl+Enter 执行）"
+              @keydown.ctrl.enter.prevent="runTableSql"
+              @keydown.meta.enter.prevent="runTableSql"
             ></textarea>
             <div class="sql-actions">
               <button class="btn-run" @click="runTableSql" :disabled="runningSql">
@@ -415,6 +452,7 @@
       <div class="modal modal-sm">
         <h3>确认删除</h3>
         <p v-if="deleteTarget === 'ROW'">确定要删除这条记录吗？此操作不可撤销。</p>
+        <p v-else-if="deleteTarget === 'COLUMN'">确定要删除列 <strong>{{ deleteColumnName }}</strong> 吗？该列的所有数据将丢失。</p>
         <p v-else>确定要删除表 <strong>{{ deleteTableName }}</strong> 吗？所有数据将丢失。</p>
         <div class="modal-actions">
           <button class="btn-cancel" @click="showDeleteConfirm = false">取消</button>
@@ -440,7 +478,7 @@ const databases = ref([])
 const selectedDb = ref('')
 
 const statusText = computed(() => {
-  const dbName = selectedDb.value || 'mysql_mulpro'
+  const dbName = selectedDb.value || '数据库'
   if (dbStatus.value === 'connecting') return dbName + ' · 连接中...'
   if (dbStatus.value === 'connected') return dbName + ' · 已连接'
   return '数据库连接失败'
@@ -451,6 +489,13 @@ const overviewStatus = computed(() => {
   return '异常'
 })
 const tables = ref([])
+const tableFilter = ref('')
+const filteredTables = computed(() => {
+  const kw = tableFilter.value.trim().toLowerCase()
+  if (!kw) return tables.value
+  return tables.value.filter((t) => t.name.toLowerCase().includes(kw))
+})
+const dbVersion = ref('')
 const selectedTable = ref('')
 const tableStructure = ref([])
 const tableRows = ref([])
@@ -492,11 +537,16 @@ const dbModalUser = ref('')
 const dbModalPass = ref('')
 const switchingDb = ref(false)
 const showDeleteConfirm = ref(false)
-const deleteTarget = ref('') // 'ROW' | 'TABLE'
+const deleteTarget = ref('') // 'ROW' | 'TABLE' | 'COLUMN'
 const deleteTableName = ref('')
+const deleteColumnName = ref('')
 const deleteRowData = ref(null)
 const deleting = ref(false)
+const exporting = ref(false)
 const modalError = ref('')
+
+// SQL 执行历史（localStorage 持久化，最近 30 条）
+const sqlHistory = ref(loadSqlHistory())
 
 // 防抖定时器
 let searchTimer = null
@@ -509,19 +559,75 @@ const apiBase = () => {
 }
 
 const apiUrl = (path) => `${apiBase()}/api/mysql${path}`
+const authUrl = (path) => `${apiBase()}/api/auth${path}`
 
 function getToken() {
   return localStorage.getItem('admin_token') || ''
 }
 
-function apiFetch(path, opts) {
+// 临近过期（<5 分钟）时自动续期 token，活跃用户不会被 30 分钟登出
+let refreshingToken = false
+function maybeRefreshToken() {
+  const expire = Number(localStorage.getItem('expire') || 0)
+  if (refreshingToken || !expire || Date.now() < expire - 5 * 60 * 1000) return
+  refreshingToken = true
+  fetch(authUrl('/refresh'), {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${getToken()}` },
+  })
+    .then(async (res) => {
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.token) {
+        localStorage.setItem('admin_token', data.token)
+        localStorage.setItem('expire', String(Date.now() + 30 * 60 * 1000))
+      }
+    })
+    .catch(() => {})
+    .finally(() => { setTimeout(() => { refreshingToken = false }, 10 * 1000) })
+}
+
+function apiFetch(path, opts = {}) {
+  maybeRefreshToken()
   return fetch(apiUrl(path), {
     ...opts,
     headers: {
       ...(opts?.headers || {}),
       'Authorization': `Bearer ${getToken()}`,
+      // 告知后端当前操作的数据库，各端/各标签页互不影响
+      ...(selectedDb.value ? { 'X-Database': selectedDb.value } : {}),
     },
   })
+}
+
+// ====================== SQL 历史 ======================
+const SQL_HISTORY_KEY = 'mysql_sql_history'
+const SQL_HISTORY_MAX = 30
+
+function loadSqlHistory() {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const raw = localStorage.getItem(SQL_HISTORY_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : []
+  } catch { return [] }
+}
+
+function pushSqlHistory(sql) {
+  const q = (sql || '').trim()
+  if (!q) return
+  sqlHistory.value = [q, ...sqlHistory.value.filter((x) => x !== q)].slice(0, SQL_HISTORY_MAX)
+  try { localStorage.setItem(SQL_HISTORY_KEY, JSON.stringify(sqlHistory.value)) } catch {}
+}
+
+function clearSqlHistory() {
+  sqlHistory.value = []
+  try { localStorage.removeItem(SQL_HISTORY_KEY) } catch {}
+}
+
+function sqlHistorySnippet(sql) {
+  const oneLine = sql.replace(/\s+/g, ' ').trim()
+  return oneLine.length > 32 ? oneLine.slice(0, 31) + '…' : oneLine
 }
 
 // 只读字段（不在编辑表单中显示）
@@ -558,16 +664,32 @@ onMounted(async () => {
   authReady.value = true
   await fetchDatabases()
   fetchTables()
+  fetchMeta()
 })
 
 // ====================== 表列表 ======================
+async function fetchMeta() {
+  try {
+    const res = await apiFetch('/meta')
+    if (res.ok) {
+      const data = await res.json()
+      dbVersion.value = data.version || ''
+    }
+  } catch (e) {
+    console.error('获取元信息失败:', e.message)
+  }
+}
+
 async function fetchDatabases() {
   try {
     const res = await apiFetch('/databases')
     if (res.ok) {
       const data = await res.json()
       databases.value = data.databases || []
-      selectedDb.value = data.current || (databases.value[0] || '')
+      // 仅在尚未选择时设置（刷新时不能覆盖用户当前选中的库）
+      if (!selectedDb.value) {
+        selectedDb.value = data.current || (databases.value[0] || '')
+      }
     }
   } catch (e) {
     console.error('获取数据库列表失败:', e.message)
@@ -649,7 +771,6 @@ function selectTable(name) {
   sqlError.value = ''
   fetchTableStructure()
   fetchTableData()
-  fetchTableSql()
 }
 
 async function fetchTableStructure() {
@@ -688,14 +809,14 @@ async function fetchTableData() {
   }
 }
 
-// 每次选中表时预取的表数据查询（用于 SQL tab 默认值）
-function fetchTableSql() {
-  // 不需要额外请求，只是设置默认 SQL
-}
-
 // ====================== 分页/排序/搜索 ======================
 function goPage(p) {
   page.value = p
+  fetchTableData()
+}
+
+function onPageSizeChange() {
+  page.value = 1
   fetchTableData()
 }
 
@@ -733,6 +854,7 @@ async function runSql() {
     const data = await res.json()
     if (res.ok) {
       sqlResult.value = data
+      pushSqlHistory(sqlQuery.value)
       // 刷新表列表（可能创建/删除了表）
       fetchTables()
     } else {
@@ -760,6 +882,7 @@ async function runTableSql() {
     const data = await res.json()
     if (res.ok) {
       sqlResult.value = data
+      pushSqlHistory(tableSqlQuery.value)
       fetchTables()
       if (activeTab.value === 'data') fetchTableData()
     } else {
@@ -873,9 +996,49 @@ async function createColumn() {
 function confirmDropTable(name) {
   deleteTarget.value = 'TABLE'
   deleteTableName.value = name
+  deleteColumnName.value = ''
   deleteRowData.value = null
   modalError.value = ''
   showDeleteConfirm.value = true
+}
+
+// ====================== 删除列 ======================
+function confirmDropColumn(col) {
+  deleteTarget.value = 'COLUMN'
+  deleteColumnName.value = col.name
+  deleteTableName.value = ''
+  deleteRowData.value = null
+  modalError.value = ''
+  showDeleteConfirm.value = true
+}
+
+// ====================== 导出 CSV ======================
+async function exportCsv() {
+  exporting.value = true
+  try {
+    const params = new URLSearchParams({
+      search: searchText.value,
+      orderBy: sortBy.value,
+      orderDir: sortDir.value,
+    })
+    const res = await apiFetch(`/tables/${selectedTable.value}/export?${params}`)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert(err.message || `导出失败（${res.status}）`)
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${selectedTable.value}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    alert(`导出失败：${e.message}`)
+  } finally {
+    exporting.value = false
+  }
 }
 
 // ====================== 新增行 ======================
@@ -895,6 +1058,7 @@ function openInsertRow() {
 async function refreshAll() {
   await fetchDatabases()
   fetchTables()
+  fetchMeta()
   if (selectedTable.value) {
     fetchTableStructure()
     fetchTableData()
@@ -938,9 +1102,9 @@ async function saveRow() {
   savingRow.value = true
   modalError.value = ''
 
-  const url = editingRow.value
-    ? apiUrl(`/tables/${selectedTable.value}/rows/${encodeURIComponent(editingRow.value[primaryKey.value])}`)
-    : apiUrl(`/tables/${selectedTable.value}/rows`)
+  const path = editingRow.value
+    ? `/tables/${selectedTable.value}/rows/${encodeURIComponent(editingRow.value[primaryKey.value])}`
+    : `/tables/${selectedTable.value}/rows`
 
   const method = editingRow.value ? 'PUT' : 'POST'
 
@@ -957,9 +1121,9 @@ async function saveRow() {
   }
 
   try {
-    const res = await fetch(url, {
+    const res = await apiFetch(path, {
       method,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     const data = await res.json()
@@ -990,15 +1154,17 @@ async function doDelete() {
   deleting.value = true
   modalError.value = ''
 
-  let url
+  let path
   if (deleteTarget.value === 'ROW') {
-    url = apiUrl(`/tables/${selectedTable.value}/rows/${encodeURIComponent(deleteRowData.value[primaryKey.value])}`)
+    path = `/tables/${selectedTable.value}/rows/${encodeURIComponent(deleteRowData.value[primaryKey.value])}`
+  } else if (deleteTarget.value === 'COLUMN') {
+    path = `/tables/${selectedTable.value}/columns/${encodeURIComponent(deleteColumnName.value)}`
   } else {
-    url = apiUrl(`/tables/${deleteTableName.value}`)
+    path = `/tables/${deleteTableName.value}`
   }
 
   try {
-    const res = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${getToken()}` } })
+    const res = await apiFetch(path, { method: 'DELETE' })
     const data = await res.json()
     if (res.ok) {
       showDeleteConfirm.value = false
@@ -1006,9 +1172,12 @@ async function doDelete() {
         if (selectedTable.value === deleteTableName.value) {
           selectedTable.value = ''
         }
+      } else if (deleteTarget.value === 'COLUMN') {
+        fetchTableData()
       }
       fetchTables()
-      if (selectedTable.value) fetchTableData()
+      if (selectedTable.value) fetchTableStructure()
+      if (selectedTable.value && deleteTarget.value !== 'TABLE') fetchTableData()
     } else {
       modalError.value = data.message
     }
@@ -1182,6 +1351,25 @@ function handleLogout() {
   border-radius: 10px;
 }
 
+/* 表筛选 */
+.table-filter-wrap {
+  padding: 0 12px 6px;
+}
+.table-filter {
+  width: 100%;
+  padding: 7px 10px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #e2e8f0;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.table-filter:focus { border-color: #60a5fa; }
+.table-filter::placeholder { color: #64748b; }
+
 .table-list { padding: 4px 0; }
 
 .table-item {
@@ -1350,6 +1538,45 @@ function handleLogout() {
 }
 .sql-editor:focus { border-color: #60a5fa; background: #fff; }
 .sql-actions { margin-top: 12px; }
+
+/* SQL 历史 */
+.sql-history {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sql-history-label {
+  font-size: 13px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+.sql-history-chip {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.sql-history-chip:hover { border-color: #60a5fa; color: #2563eb; background: #eff6ff; }
+.sql-history-clear {
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.sql-history-clear:hover { color: #ef4444; }
 .btn-run {
   padding: 10px 28px;
   background: #3b82f6;
@@ -1504,6 +1731,19 @@ function handleLogout() {
 .btn-secondary:hover { background: #f1f5f9; }
 .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* 每页行数选择 */
+.page-size-select {
+  padding: 10px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #475569;
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+}
+.page-size-select:focus { border-color: #60a5fa; }
+
 /* ========== 表格 ========== */
 .table-wrap {
   background: #fff;
@@ -1575,6 +1815,7 @@ code { font-family: 'Consolas', monospace; font-size: 13px; background: #f1f5f9;
   border-radius: 10px;
   font-weight: 600;
 }
+.col-locked { color: #cbd5e1; }
 
 /* 操作按钮 */
 .td-actions {

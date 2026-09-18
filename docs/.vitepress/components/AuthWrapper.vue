@@ -9,8 +9,8 @@
     <div v-else-if="!isLogin" class="login-box">
       <h2>管理员登录</h2>
 
-      <input v-model="username" placeholder="请输入账号" />
-      <input v-model="password" type="password" placeholder="请输入密码" />
+      <input v-model="username" placeholder="请输入账号" @keyup.enter="login" />
+      <input v-model="password" type="password" placeholder="请输入密码" @keyup.enter="login" />
 
       <button @click="login">登 录</button>
 
