@@ -194,6 +194,37 @@ app.use('/api/mysql', (req, res, next) => {
   next();
 });
 
+// === 审计日志（集中写入默认库的 audit_log 表，跨库统一记录） ===
+let auditEnsured = false;
+async function ensureAuditTable() {
+  if (auditEnsured) return true;
+  try {
+    await getPool(MYSQL_DB).query(`CREATE TABLE IF NOT EXISTS \`audit_log\` (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(64) NOT NULL DEFAULT '',
+      action VARCHAR(32) NOT NULL DEFAULT '',
+      target VARCHAR(191) NOT NULL DEFAULT '',
+      detail VARCHAR(1024) NOT NULL DEFAULT '',
+      ip VARCHAR(64) NOT NULL DEFAULT '',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_created (created_at),
+      KEY idx_action (action)
+    ) CHARSET=utf8mb4`);
+    auditEnsured = true;
+    return true;
+  } catch { return false; }
+}
+
+async function writeAudit(req, action, target = '', detail = '') {
+  try {
+    if (!(await ensureAuditTable())) return;
+    await getPool(MYSQL_DB).query(
+      'INSERT INTO `audit_log` (username, action, target, detail, ip) VALUES (?, ?, ?, ?, ?)',
+      [req.user?.username || 'unknown', action, String(target || '').slice(0, 190), String(detail || '').slice(0, 1000), String(req.ip || '').slice(0, 60)]
+    );
+  } catch { /* 审计失败不阻断主流程 */ }
+}
+
 const safeId = (name) => `[${String(name).replace(/]/g, '')}]`;
 
 const escapeXml = (value = '') => String(value)
@@ -555,6 +586,7 @@ app.post('/api/mysql/use-database', async (req, res) => {
       dbCredentials.set(database, { user: user || creds.user, password: password || creds.password });
       dropPoolsForDb(database);
     }
+    await writeAudit(req, 'SWITCH_DATABASE', database);
     res.json({ message: `数据库 ${database} 可用。`, current: database });
   } catch (e) {
     res.status(500).json({ message: `切换数据库失败：${e.message}` });
@@ -567,6 +599,223 @@ app.get('/api/mysql/meta', async (req, res) => {
     const [[row]] = await req.dbPool.query('SELECT VERSION() AS version');
     res.json({ version: row.version, database: req.dbName });
   } catch (e) { res.status(500).json({ message: `获取元信息失败：${e.message}` }); }
+});
+
+// ==================== 数据治理 API ====================
+
+const GOV_STRING_TYPES = ['char','varchar','text','tinytext','mediumtext','longtext','enum','set'];
+const GOV_ISSUE_ORDER = { error: 0, warn: 1, info: 2 };
+
+// 数据质量检测：主键、空值率、空字符串、唯一值、整行重复
+app.get('/api/mysql/governance/quality/:name', async (req, res) => {
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
+  try {
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+    if (cols.length === 0) return res.status(400).json({ message: '该表没有任何字段。' });
+    const hasPK = cols.some((c) => c.Key === 'PRI');
+    const [[{ total }]] = await req.dbPool.query(`SELECT COUNT(*) AS total FROM ${tName}`);
+    const totalRows = Number(total);
+    const issues = [];
+    let score = 100;
+
+    if (totalRows === 0) issues.push({ level: 'info', message: '表当前没有任何数据。' });
+    if (!hasPK) {
+      issues.push({ level: 'error', message: '表没有主键，无法唯一定位行记录，不利于数据同步与去重。' });
+      score -= 20;
+    }
+
+    const SKIP_SCAN_ROWS = 500000;
+    let colStats;
+    if (totalRows > 0 && totalRows <= SKIP_SCAN_ROWS) {
+      const parts = [];
+      for (const c of cols) {
+        const b = backtick(c.Field);
+        parts.push(`SUM(${b} IS NULL) AS ${backtick('null_' + c.Field)}`);
+        if (GOV_STRING_TYPES.some((t) => c.Type.toLowerCase().includes(t))) {
+          parts.push(`SUM(${b} = '') AS ${backtick('empty_' + c.Field)}`);
+        }
+        parts.push(`COUNT(DISTINCT ${b}) AS ${backtick('dist_' + c.Field)}`);
+      }
+      const [[agg]] = await req.dbPool.query(`SELECT ${parts.join(', ')} FROM ${tName}`);
+      colStats = cols.map((c) => {
+        const isStr = GOV_STRING_TYPES.some((t) => c.Type.toLowerCase().includes(t));
+        const nullCount = Number(agg[`null_${c.Field}`] || 0);
+        const emptyCount = isStr ? Number(agg[`empty_${c.Field}`] || 0) : null;
+        const distinct = Number(agg[`dist_${c.Field}`] || 0);
+        const nullRatio = totalRows > 0 ? nullCount / totalRows : 0;
+        if (totalRows > 0 && nullRatio > 0.5 && c.Null === 'YES') {
+          issues.push({ level: 'warn', message: `字段 ${c.Field} 的空值率 ${(nullRatio * 100).toFixed(1)}%，请确认该字段是否仍有业务意义。` });
+          score -= 10;
+        }
+        if (emptyCount > 0) {
+          issues.push({ level: 'info', message: `字段 ${c.Field} 存在 ${emptyCount} 个空字符串值。` });
+          score -= 3;
+        }
+        return { name: c.Field, type: c.Type, nullable: c.Null === 'YES', key: c.Key || null, nullCount, nullRatio, emptyCount, distinct };
+      });
+    } else {
+      issues.push({ level: 'info', message: `表行数超过 ${SKIP_SCAN_ROWS}，已跳过逐字段扫描，仅检测结构性问题。` });
+      colStats = cols.map((c) => ({ name: c.Field, type: c.Type, nullable: c.Null === 'YES', key: c.Key || null, nullCount: null, nullRatio: null, emptyCount: null, distinct: null }));
+    }
+
+    // 整行重复检测（仅中小表）
+    if (totalRows > 0 && totalRows <= 100000) {
+      const allCols = cols.map((c) => backtick(c.Field)).join(', ');
+      const [[{ n }]] = await req.dbPool.query(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM ${tName} GROUP BY ${allCols} HAVING COUNT(*) > 1 LIMIT 50) x`);
+      const dupGroups = Number(n || 0);
+      if (dupGroups > 0) {
+        issues.push({ level: 'error', message: `发现 ${dupGroups} 组完全重复的记录。` });
+        score -= 15;
+      }
+    }
+
+    score = Math.max(0, Math.min(100, score));
+    issues.sort((a, b) => GOV_ISSUE_ORDER[a.level] - GOV_ISSUE_ORDER[b.level]);
+    res.json({ table: req.params.name, totalRows, hasPK, score, issues, columns: colStats });
+  } catch (e) { res.status(500).json({ message: `质量检测失败：${e.message}` }); }
+});
+
+// 敏感字段识别：字段命名规则 + 内容采样（各字符串字段采样 500 行）
+const SENSITIVE_NAME_RULES = [
+  { re: /pass|pwd|secret|token|credential/i, category: '凭证口令', level: 'high' },
+  { re: /idcard|id_card|identity|sfz/i, category: '身份证号', level: 'high' },
+  { re: /bank|card_no|cardno/i, category: '银行卡号', level: 'high' },
+  { re: /phone|mobile|tel/i, category: '手机号', level: 'high' },
+  { re: /email|mail/i, category: '邮箱', level: 'medium' },
+  { re: /addr|address/i, category: '住址信息', level: 'medium' },
+  { re: /birth|birthday/i, category: '出生日期', level: 'medium' },
+  { re: /(^|_)name$/i, category: '姓名信息', level: 'low' },
+];
+const SENSITIVE_VALUE_RULES = [
+  { re: /1[3-9]\d{9}/, category: '手机号', level: 'high' },
+  { re: /[\w.+-]+@[\w-]+\.[\w.-]+/, category: '邮箱', level: 'medium' },
+  { re: /\d{17}[\dXx]/, category: '身份证号', level: 'high' },
+];
+
+app.get('/api/mysql/governance/sensitive/:name', async (req, res) => {
+  const tName = backtick(req.params.name);
+  if (!tName) return res.status(400).json({ message: `表名 "${req.params.name}" 不合法。` });
+  try {
+    const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+    const findings = [];
+    const seen = new Set();
+    const add = (f) => {
+      const k = `${f.column}|${f.category}`;
+      if (!seen.has(k)) { seen.add(k); findings.push(f); }
+    };
+    for (const c of cols) {
+      for (const r of SENSITIVE_NAME_RULES) {
+        if (r.re.test(c.Field)) add({ column: c.Field, type: c.Type, category: r.category, level: r.level, source: '字段命名', hits: null });
+      }
+    }
+    const stringCols = cols.filter((c) => GOV_STRING_TYPES.some((t) => c.Type.toLowerCase().includes(t)));
+    for (const c of stringCols.slice(0, 8)) {
+      const b = backtick(c.Field);
+      const [rows] = await req.dbPool.query(`SELECT ${b} AS v FROM ${tName} WHERE ${b} IS NOT NULL AND ${b} != '' LIMIT 500`);
+      for (const r of SENSITIVE_VALUE_RULES) {
+        let hits = 0;
+        for (const row of rows) if (r.re.test(String(row.v))) hits++;
+        if (hits > 0) add({ column: c.Field, type: c.Type, category: r.category, level: r.level, source: '内容采样', hits });
+      }
+    }
+    const levelOrder = { high: 0, medium: 1, low: 2 };
+    findings.sort((a, b) => levelOrder[a.level] - levelOrder[b.level]);
+    res.json({ table: req.params.name, scanned: { stringColumns: stringCols.length, sampleSize: 500 }, findings });
+  } catch (e) { res.status(500).json({ message: `敏感字段扫描失败：${e.message}` }); }
+});
+
+// 数据字典：表与字段的类型、键、注释（information_schema）
+app.get('/api/mysql/governance/dictionary', async (req, res) => {
+  const table = req.query.table;
+  if (table && !isSafeIdent(String(table))) return res.status(400).json({ message: `表名 "${table}" 不合法。` });
+  try {
+    const [tables] = await req.dbPool.query(
+      `SELECT TABLE_NAME, TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME`,
+      [req.dbName]
+    );
+    let colSql = `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT
+      FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ?`;
+    const params = [req.dbName];
+    if (table) { colSql += ' AND TABLE_NAME = ?'; params.push(String(table)); }
+    colSql += ' ORDER BY TABLE_NAME, ORDINAL_POSITION';
+    const [cols] = await req.dbPool.query(colSql, params);
+    res.json({
+      tables: tables.map((t) => ({ name: t.TABLE_NAME, comment: t.TABLE_COMMENT || '' })),
+      columns: cols.map((c) => ({
+        table: c.TABLE_NAME, name: c.COLUMN_NAME, type: c.COLUMN_TYPE,
+        nullable: c.IS_NULLABLE === 'YES', key: c.COLUMN_KEY || null,
+        default: c.COLUMN_DEFAULT, extra: c.EXTRA || '', comment: c.COLUMN_COMMENT || '',
+      })),
+    });
+  } catch (e) { res.status(500).json({ message: `获取数据字典失败：${e.message}` }); }
+});
+
+// 数据字典导出 CSV（当前库全部表）
+app.get('/api/mysql/governance/dictionary/export', async (req, res) => {
+  try {
+    const [cols] = await req.dbPool.query(
+      `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT
+       FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION`,
+      [req.dbName]
+    );
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="data-dictionary.csv"');
+    res.write('\uFEFF');
+    res.write('表名,序号,字段名,字段类型,可空,键,默认值,额外,注释\r\n');
+    let last = null, seq = 0;
+    for (const c of cols) {
+      if (c.TABLE_NAME !== last) { last = c.TABLE_NAME; seq = 0; }
+      seq++;
+      const row = [c.TABLE_NAME, seq, c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_KEY || '', c.COLUMN_DEFAULT ?? '', c.EXTRA || '', c.COLUMN_COMMENT || ''];
+      res.write(row.map(csvField).join(',') + '\r\n');
+    }
+    res.end();
+  } catch (e) { res.status(500).json({ message: `导出数据字典失败：${e.message}` }); }
+});
+
+// 数据库总览统计：各表引擎、行数估算、占用空间（information_schema）
+app.get('/api/mysql/governance/overview', async (req, res) => {
+  try {
+    const [rows] = await req.dbPool.query(
+      `SELECT TABLE_NAME AS name, ENGINE AS engine, TABLE_ROWS AS approxRows,
+              DATA_LENGTH AS dataLength, INDEX_LENGTH AS indexLength,
+              UPDATE_TIME AS updateTime, TABLE_COMMENT AS comment
+       FROM information_schema.TABLES
+       WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
+       ORDER BY TABLE_NAME`,
+      [req.dbName]
+    );
+    const tables = rows.map((r) => ({
+      name: r.name,
+      engine: r.engine || '—',
+      approxRows: Number(r.approxRows || 0),
+      sizeKb: Number((((Number(r.dataLength) || 0) + (Number(r.indexLength) || 0)) / 1024).toFixed(1)),
+      updateTime: r.updateTime || null,
+      comment: r.comment || '',
+    }));
+    const totalSizeKb = Number(tables.reduce((s, t) => s + t.sizeKb, 0).toFixed(1));
+    res.json({ tables, totalSizeKb });
+  } catch (e) { res.status(500).json({ message: `获取总览统计失败：${e.message}` }); }
+});
+
+// 审计日志查询（集中存储于默认库，与 X-Database 无关）
+app.get('/api/mysql/governance/audit', async (req, res) => {
+  if (!(await ensureAuditTable())) return res.status(500).json({ message: '审计表初始化失败，请检查默认数据库连接。' });
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize) || 15));
+  const action = String(req.query.action || '');
+  const where = action ? 'WHERE action = ?' : '';
+  const params = action ? [action] : [];
+  try {
+    const [[{ total }]] = await getPool(MYSQL_DB).query(`SELECT COUNT(*) AS total FROM \`audit_log\` ${where}`, params);
+    const [rows] = await getPool(MYSQL_DB).query(
+      `SELECT id, username, action, target, detail, ip, created_at FROM \`audit_log\` ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...params, pageSize, (page - 1) * pageSize]
+    );
+    const [acts] = await getPool(MYSQL_DB).query('SELECT DISTINCT action FROM `audit_log` ORDER BY action');
+    res.json({ rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize), actions: acts.map((r) => r.action) });
+  } catch (e) { res.status(500).json({ message: `查询审计日志失败：${e.message}` }); }
 });
 
 app.get('/api/mysql/tables', async (req, res) => {
@@ -611,6 +860,7 @@ app.post('/api/mysql/tables/:name/columns', async (req, res) => {
   try {
     await req.dbPool.query(`ALTER TABLE ${tName} ${def}`);
     clearDbCache(req.dbName);
+    await writeAudit(req, 'ADD_COLUMN', `${req.params.name}.${colName}`, colType);
     res.json({ message: `列 ${colName} 已添加到表 ${req.params.name}。` });
   } catch (e) { res.status(500).json({ message: `添加列失败：${e.message}` }); }
 });
@@ -627,6 +877,7 @@ app.delete('/api/mysql/tables/:name/columns/:col', async (req, res) => {
     if (cols.length <= 1) return res.status(400).json({ message: '表至少需要保留一列。' });
     await req.dbPool.query(`ALTER TABLE ${tName} DROP COLUMN ${cName}`);
     clearDbCache(req.dbName);
+    await writeAudit(req, 'DROP_COLUMN', `${req.params.name}.${req.params.col}`);
     res.json({ message: `列 ${req.params.col} 已删除。` });
   } catch (e) { res.status(500).json({ message: `删除列失败：${e.message}` }); }
 });
@@ -668,6 +919,7 @@ app.post('/api/mysql/tables', async (req, res) => {
   try {
     await req.dbPool.query(`CREATE TABLE ${tName} (${colDefs.join(', ')})`);
     clearDbCache(req.dbName);
+    await writeAudit(req, 'CREATE_TABLE', name, `${columns.length} 个字段`);
     res.json({ message: `表 ${name} 创建成功。` });
   } catch (e) { res.status(500).json({ message: `创建表失败：${e.message}` }); }
 });
@@ -686,6 +938,7 @@ app.post('/api/mysql/tables/:name/renumber-ids', async (req, res) => {
     const next = Number(mx[0].max_id || 0) + 1;
     await req.dbPool.query(`ALTER TABLE ${tName} AUTO_INCREMENT = ${next}`);
     clearDbCache(req.dbName);
+    await writeAudit(req, 'RENUMBER_IDS', req.params.name);
     res.json({ message: `ID 重新编号完成，下次插入起始: ${next}。` });
   } catch (e) { res.status(500).json({ message: `重新编号失败：${e.message}` }); }
 });
@@ -696,6 +949,7 @@ app.delete('/api/mysql/tables/:name', async (req, res) => {
   try {
     await req.dbPool.query(`DROP TABLE IF EXISTS ${tName}`);
     clearDbCache(req.dbName);
+    await writeAudit(req, 'DROP_TABLE', req.params.name);
     res.json({ message: `表 ${req.params.name} 已删除。` });
   } catch (e) { res.status(500).json({ message: `删除表失败：${e.message}` }); }
 });
@@ -778,6 +1032,7 @@ app.post('/api/mysql/tables/:name/rows', async (req, res) => {
     if (keys.length === 0) return res.status(400).json({ message: '请提供要插入的数据。' });
     const [r] = await req.dbPool.query(`INSERT INTO ${tName} (${keys.map((k) => backtick(k)).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, Object.values(clean));
     clearDbCache(req.dbName);
+    await writeAudit(req, 'INSERT_ROW', req.params.name, `insertId=${r.insertId}; 字段=${keys.join(',')}`);
     res.json({ message: '插入成功。', insertId: r.insertId });
   } catch (e) { res.status(500).json({ message: `插入数据失败：${e.message}` }); }
 });
@@ -794,6 +1049,7 @@ app.put('/api/mysql/tables/:name/rows/:id', async (req, res) => {
     if (!pkCol) return res.status(400).json({ message: '该表没有主键，无法通过 ID 更新。' });
     const setClauses = Object.keys(clean).map((k) => `${backtick(k)} = ?`).join(', ');
     const [r] = await req.dbPool.query(`UPDATE ${tName} SET ${setClauses} WHERE ${backtick(pkCol)} = ?`, [...Object.values(clean), req.params.id]);
+    await writeAudit(req, 'UPDATE_ROW', `${req.params.name}#${req.params.id}`, Object.keys(clean).join(','));
     res.json({ message: '更新成功。', affectedRows: r.affectedRows });
   } catch (e) { res.status(500).json({ message: `更新数据失败：${e.message}` }); }
 });
@@ -806,6 +1062,7 @@ app.delete('/api/mysql/tables/:name/rows/:id', async (req, res) => {
     const pkCol = cols.find((c) => c.Key === 'PRI')?.Field;
     if (!pkCol) return res.status(400).json({ message: '该表没有主键，无法通过 ID 删除。' });
     const [r] = await req.dbPool.query(`DELETE FROM ${tName} WHERE ${backtick(pkCol)} = ?`, [req.params.id]);
+    await writeAudit(req, 'DELETE_ROW', `${req.params.name}#${req.params.id}`);
     res.json({ message: '删除成功。', affectedRows: r.affectedRows });
   } catch (e) { res.status(500).json({ message: `删除数据失败：${e.message}` }); }
 });
@@ -822,6 +1079,7 @@ app.post('/api/mysql/query', async (req, res) => {
   if (forbidden) return res.status(403).json({ message: `禁止执行包含 ${forbidden} 的语句。` });
   try {
     const [rows, fields] = await req.dbPool.query(sql);
+    await writeAudit(req, 'SQL_EXECUTE', req.dbName, sql.slice(0, 300));
     if (Array.isArray(rows)) {
       res.json({ type: 'result', columns: fields ? fields.map((f) => f.name) : [], rows, rowCount: rows.length });
     } else {

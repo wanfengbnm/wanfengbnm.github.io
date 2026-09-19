@@ -1,26 +1,55 @@
 <template>
   <div v-if="authReady" class="mgmt-container">
 
-    <!-- ==================== 侧边栏 ==================== -->
-    <aside class="mgmt-sidebar">
-      <div class="sidebar-brand">
-        <span class="brand-icon">🗄️</span>
-        <span class="brand-text">多平台数据库管理</span>
-      </div>
-
-      <!-- 数据库选择 -->
-      <div class="db-selector">
-        <div class="db-current" @click="openDbModal">
-          <span class="db-label">📦 {{ selectedDb || '选择数据库' }}</span>
-          <span class="db-arrow">▾</span>
+      <!-- ==================== 侧边栏 ==================== -->
+      <aside class="mgmt-sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+            </svg>
+          </div>
+          <div class="brand-meta">
+            <span class="brand-text">数据库管理控制台</span>
+          </div>
         </div>
-      </div>
+
+        <!-- 数据库选择 -->
+        <div class="db-selector">
+          <div class="db-current" @click="openDbModal">
+            <div class="db-meta">
+              <span class="db-label">当前数据库</span>
+              <span class="db-name">{{ selectedDb || '选择数据库' }}</span>
+            </div>
+            <span class="db-arrow">▾</span>
+          </div>
+        </div>
 
       <!-- 连接状态 -->
       <div class="conn-status" :class="dbStatus">
         <span class="conn-dot"></span>
         <span class="conn-text">{{ statusText }}</span>
       </div>
+
+      <!-- 主导航 -->
+      <nav class="side-nav">
+        <div class="table-item" :class="{ active: !selectedTable && !sqlView }" @click="selectTable('')">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+          </span>
+          <span class="table-name-text">总览</span>
+        </div>
+        <div class="table-item" :class="{ active: sqlView }" @click="openSqlView">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+          </span>
+          <span class="table-name-text">SQL 编辑器</span>
+        </div>
+      </nav>
 
       <!-- 表列表 -->
       <div class="sidebar-section">
@@ -29,14 +58,9 @@
           <span class="section-count" v-if="tables.length">{{ tables.length }}</span>
         </div>
         <div class="table-filter-wrap" v-if="tables.length > 5">
-          <input v-model="tableFilter" class="table-filter" placeholder="🔍 筛选表..." />
+          <input v-model="tableFilter" class="table-filter" placeholder="筛选表..." />
         </div>
         <nav class="table-list">
-          <!-- 总览入口 -->
-          <div class="table-item overview-item" :class="{ active: !selectedTable }" @click="selectTable('')">
-            <span class="table-icon">📊</span>
-            <span class="table-name-text">总览</span>
-          </div>
           <div
             v-for="t in filteredTables"
             :key="t.name"
@@ -44,7 +68,6 @@
             :class="{ active: selectedTable === t.name }"
             @click="selectTable(t.name)"
           >
-            <span class="table-icon">📋</span>
             <span class="table-name-text">{{ t.name }}</span>
             <span class="table-row-count">{{ t.rowCount }}</span>
             <span class="table-delete" @click.stop="confirmDropTable(t.name)" title="删除表">×</span>
@@ -71,21 +94,24 @@
         <span class="main-title" v-if="selectedTable">{{ selectedTable }}</span>
         <span class="main-title" v-else>总览</span>
         <div class="main-toolbar-right">
-          <button class="btn-refresh-top" @click="refreshAll">🔄 刷新状态</button>
+          <button class="btn-refresh-top" @click="refreshAll">刷新状态</button>
           <button class="btn-logout-top" @click="handleLogout">退出登录</button>
         </div>
       </div>
 
       <div class="mgmt-content-area">
-      <!-- ===== 未选中表：SQL 编辑器 + 概览 ===== -->
-      <div v-if="!selectedTable" class="welcome-view">
-        <div class="sql-card">
-          <h2 class="card-title">📝 SQL 查询编辑器</h2>
+      <!-- ===== 独立 SQL 编辑器视图 ===== -->
+      <div v-if="sqlView" class="sql-view">
+        <div class="sql-card sql-card-full">
+          <div class="sql-view-head">
+            <h2 class="card-title">SQL 查询编辑器</h2>
+            <span class="gov-hint">当前数据库：{{ selectedDb || '—' }} · Ctrl+Enter 执行</span>
+          </div>
           <textarea
             v-model="sqlQuery"
-            class="sql-editor"
+            class="sql-editor sql-editor-tall"
             placeholder="输入 SQL 语句…（Ctrl+Enter 执行）&#10;例如：CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100) NOT NULL, email VARCHAR(255))"
-            rows="5"
+            rows="12"
             @keydown.ctrl.enter.prevent="runSql"
             @keydown.meta.enter.prevent="runSql"
           ></textarea>
@@ -98,12 +124,13 @@
               :title="h"
               @click="sqlQuery = h"
             >{{ sqlHistorySnippet(h) }}</button>
-            <button class="sql-history-clear" @click="clearSqlHistory">清空</button>
+            <button class="sql-history-clear" @click="clearSqlHistory">清空历史</button>
           </div>
           <div class="sql-actions">
             <button class="btn-run" @click="runSql" :disabled="runningSql">
               {{ runningSql ? '执行中...' : '▶ 执行' }}
             </button>
+            <button class="btn-secondary" v-if="sqlQuery || sqlResult || sqlError" @click="clearSqlEditor">清空</button>
           </div>
           <div v-if="sqlError" class="sql-error">{{ sqlError }}</div>
           <div v-if="sqlResult" class="sql-result">
@@ -129,28 +156,43 @@
             </div>
           </div>
         </div>
+      </div>
 
+      <!-- ===== 未选中表：总览统计 ===== -->
+      <div v-else-if="!selectedTable" class="welcome-view">
         <!-- 概览统计 -->
         <div class="overview-cards">
           <div class="overview-card">
-            <div class="ov-icon">📊</div>
             <div class="ov-value">{{ tables.length }}</div>
             <div class="ov-label">数据表</div>
           </div>
           <div class="overview-card">
-            <div class="ov-icon">📝</div>
             <div class="ov-value">{{ totalRowCount }}</div>
             <div class="ov-label">总行数</div>
           </div>
           <div class="overview-card">
-            <div class="ov-icon">🟢</div>
-            <div class="ov-value">{{ overviewStatus }}</div>
+            <div class="ov-value" :class="dbStatus === 'connected' ? 'ov-ok' : (dbStatus === 'error' ? 'ov-bad' : '')">{{ overviewStatus }}</div>
             <div class="ov-label">连接状态</div>
           </div>
           <div class="overview-card">
-            <div class="ov-icon">🏷️</div>
-            <div class="ov-value">{{ dbVersion || '—' }}</div>
+            <div class="ov-value ov-sm">{{ dbVersion || '—' }}</div>
             <div class="ov-label">数据库版本</div>
+          </div>
+          <div class="overview-card">
+            <div class="ov-value ov-sm">{{ fmtSize(govOverview?.totalSizeKb) }}</div>
+            <div class="ov-label">总存储空间</div>
+          </div>
+        </div>
+
+        <!-- 统计图表 -->
+        <div class="overview-charts" v-if="tables.length > 0">
+          <div class="chart-card">
+            <h3 class="chart-title">各表行数分布</h3>
+            <div ref="rowsChartEl" class="chart-body"></div>
+          </div>
+          <div class="chart-card">
+            <h3 class="chart-title">各表存储空间占比</h3>
+            <div ref="sizeChartEl" class="chart-body"></div>
           </div>
         </div>
       </div>
@@ -190,10 +232,10 @@
             </select>
             <button class="btn-primary" @click="openInsertRow">+ 新增行</button>
             <button class="btn-secondary" @click="exportCsv" :disabled="exporting">
-              {{ exporting ? '导出中...' : '⬇ 导出 CSV' }}
+              {{ exporting ? '导出中...' : '导出 CSV' }}
             </button>
             <button class="btn-secondary" @click="renumberIds" :disabled="renumbering">
-              {{ renumbering ? '处理中...' : '↻ 重新编号ID' }}
+              {{ renumbering ? '处理中...' : '重新编号 ID' }}
             </button>
           </div>
 
@@ -239,8 +281,7 @@
         <div v-if="activeTab === 'structure'" class="tab-content">
           <div class="toolbar">
             <button class="btn-primary" @click="openAddColumn">+ 新建列</button>
-          </div>
-          <div class="table-wrap">
+          </div>          <div class="table-wrap">
             <table class="data-table">
               <thead>
                 <tr>
@@ -316,6 +357,161 @@
             </div>
           </div>
         </div>
+
+        <!-- Tab：数据治理 -->
+        <div v-if="activeTab === 'gov'" class="tab-content">
+          <div class="gov-subnav">
+            <div
+              v-for="gt in govTabs"
+              :key="gt.key"
+              class="gov-subitem"
+              :class="{ active: govTab === gt.key }"
+              @click="onGovTabChange(gt.key)"
+            >{{ gt.label }}</div>
+          </div>
+
+          <!-- 质量检测 -->
+          <div v-if="govTab === 'quality'" class="gov-section">
+            <div class="gov-toolbar">
+              <button class="btn-primary" @click="runQuality" :disabled="qualityLoading">
+                {{ qualityLoading ? '检测中...' : '运行质量检测' }}
+              </button>
+              <span class="gov-hint">对表 {{ selectedTable }} 执行主键、空值率、空字符串与整行重复检查</span>
+            </div>
+            <div v-if="qualityData" class="quality-summary">
+              <div class="quality-score-box" :class="qualityScoreClass">
+                <div class="quality-score">{{ qualityData.score }}</div>
+                <div class="quality-score-label">质量评分</div>
+              </div>
+              <div class="quality-meta">
+                <div class="q-meta-row">共 {{ qualityData.totalRows }} 行数据 · {{ qualityData.columns.length }} 个字段</div>
+                <div class="q-meta-row">{{ qualityData.hasPK ? '已定义主键' : '未定义主键' }} · 发现 {{ qualityData.issues.length }} 项待关注问题</div>
+              </div>
+              <ul class="issue-list">
+                <li v-if="qualityData.issues.length === 0" class="issue-item ok">未发现数据质量问题</li>
+                <li v-for="(iss, ii) in qualityData.issues" :key="ii" class="issue-item" :class="iss.level">
+                  <span class="issue-level">{{ levelLabel(iss.level) }}</span>{{ iss.message }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="qualityData" class="table-wrap gov-table">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>字段</th><th>类型</th><th>空值数</th><th>空值率</th><th>空字符串</th><th>唯一值数</th><th>键</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in qualityData.columns" :key="c.name">
+                    <td class="col-name">{{ c.name }}</td>
+                    <td><code>{{ c.type }}</code></td>
+                    <td>{{ c.nullCount ?? '—' }}</td>
+                    <td>{{ c.nullRatio === null ? '—' : ((c.nullRatio * 100).toFixed(1) + '%') }}</td>
+                    <td>{{ c.emptyCount ?? '—' }}</td>
+                    <td>{{ c.distinct ?? '—' }}</td>
+                    <td><span v-if="c.key" class="key-badge">{{ c.key }}</span><span v-else>—</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 敏感字段 -->
+          <div v-if="govTab === 'sensitive'" class="gov-section">
+            <div class="gov-toolbar">
+              <button class="btn-primary" @click="runSensitive" :disabled="sensitiveLoading">
+                {{ sensitiveLoading ? '扫描中...' : '开始敏感扫描' }}
+              </button>
+              <span class="gov-hint">基于字段命名规则与内容采样（每字段 500 行）识别敏感数据</span>
+            </div>
+            <div v-if="sensitiveData" class="table-wrap gov-table">
+              <table class="data-table" v-if="sensitiveData.findings.length > 0">
+                <thead>
+                  <tr><th>字段</th><th>类型</th><th>敏感类别</th><th>风险等级</th><th>识别依据</th><th>命中数</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(f, fi) in sensitiveData.findings" :key="fi">
+                    <td class="col-name">{{ f.column }}</td>
+                    <td><code>{{ f.type }}</code></td>
+                    <td>{{ f.category }}</td>
+                    <td><span class="risk-badge" :class="f.level">{{ riskLabel(f.level) }}</span></td>
+                    <td>{{ f.source }}</td>
+                    <td>{{ f.hits === null ? '—' : f.hits + ' / 500' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="gov-empty">未在表 {{ selectedTable }} 中识别到敏感字段</div>
+            </div>
+          </div>
+
+          <!-- 数据字典 -->
+          <div v-if="govTab === 'dict'" class="gov-section">
+            <div class="gov-toolbar">
+              <select v-model="dictTable" @change="fetchDictionary" class="gov-select">
+                <option value="" disabled>选择表</option>
+                <option v-for="t in dictTables" :key="t.name" :value="t.name">{{ t.name }}{{ t.comment ? '（' + t.comment + '）' : '' }}</option>
+              </select>
+              <button class="btn-secondary" @click="exportDictionary" :disabled="dictExporting">
+                {{ dictExporting ? '导出中...' : '导出全部 CSV' }}
+              </button>
+            </div>
+            <div v-if="dictColumns.length" class="table-wrap gov-table">
+              <table class="data-table">
+                <thead>
+                  <tr><th>字段</th><th>类型</th><th>可空</th><th>键</th><th>默认值</th><th>注释</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in dictColumns" :key="c.name">
+                    <td class="col-name">{{ c.name }}</td>
+                    <td><code>{{ c.type }}</code></td>
+                    <td>{{ c.nullable ? 'YES' : 'NO' }}</td>
+                    <td><span v-if="c.key" class="key-badge">{{ c.key }}</span><span v-else>—</span></td>
+                    <td>{{ c.default ?? 'NULL' }}</td>
+                    <td class="dict-comment">{{ c.comment || '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="gov-empty">{{ dictLoading ? '加载中...' : '请选择要查看的表' }}</div>
+          </div>
+
+          <!-- 审计日志 -->
+          <div v-if="govTab === 'audit'" class="gov-section">
+            <div class="gov-toolbar">
+              <select v-model="auditAction" @change="onAuditFilter" class="gov-select">
+                <option value="">全部操作</option>
+                <option v-for="a in auditActions" :key="a" :value="a">{{ govActionLabel(a) }}</option>
+              </select>
+              <button class="btn-secondary" @click="onAuditFilter">刷新</button>
+              <span class="gov-hint">共 {{ auditTotal }} 条记录</span>
+            </div>
+            <div class="table-wrap gov-table">
+              <table class="data-table">
+                <thead>
+                  <tr><th>时间</th><th>操作人</th><th>操作</th><th>对象</th><th>详情</th><th>IP</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in auditRows" :key="r.id">
+                    <td class="audit-time">{{ formatTime(r.created_at) }}</td>
+                    <td>{{ r.username }}</td>
+                    <td><span class="audit-action">{{ govActionLabel(r.action) }}</span></td>
+                    <td class="audit-target">{{ r.target || '—' }}</td>
+                    <td class="audit-detail" :title="r.detail">{{ r.detail || '—' }}</td>
+                    <td class="audit-ip">{{ r.ip || '—' }}</td>
+                  </tr>
+                  <tr v-if="auditRows.length === 0">
+                    <td colspan="6" class="empty-cell">{{ auditLoading ? '加载中...' : '暂无审计记录' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination" v-if="auditPages > 1">
+              <button :disabled="auditPage <= 1" @click="goAuditPage(auditPage - 1)">‹ 上一页</button>
+              <span class="page-info">{{ auditPage }} / {{ auditPages }}</span>
+              <button :disabled="auditPage >= auditPages" @click="goAuditPage(auditPage + 1)">下一页 ›</button>
+            </div>
+          </div>
+        </div>
       </div>
       </div>
     </main>
@@ -334,7 +530,7 @@
               :class="{ active: dbModalDb === db }"
               @click="dbModalDb = db"
             >
-              📦 {{ db }}
+              {{ db }}
             </div>
           </div>
         </div>
@@ -468,7 +664,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import * as echarts from 'echarts'
 
 // 管理页挂载期间给 body 打标记以隐藏 VitePress 页脚；卸载即移除，避免全局样式泄漏
 const BODY_FLAG = 'dbm-dashboard-active'
@@ -493,6 +690,7 @@ const overviewStatus = computed(() => {
 })
 const tables = ref([])
 const tableFilter = ref('')
+const sqlView = ref(false) // 独立 SQL 编辑器视图
 const filteredTables = computed(() => {
   const kw = tableFilter.value.trim().toLowerCase()
   if (!kw) return tables.value
@@ -638,10 +836,287 @@ const READONLY_COLS = ['id', 'created_at', 'updated_at']
 
 // ====================== 计算属性 ======================
 const tabs = [
-  { key: 'data', label: '📋 浏览数据' },
-  { key: 'structure', label: '📐 表结构' },
-  { key: 'sql', label: '✏️ SQL 查询' },
+  { key: 'data', label: '数据浏览' },
+  { key: 'structure', label: '表结构' },
+  { key: 'sql', label: 'SQL 查询' },
+  { key: 'gov', label: '数据治理' },
 ]
+
+// ====================== 数据治理 ======================
+const govTabs = [
+  { key: 'quality', label: '质量检测' },
+  { key: 'sensitive', label: '敏感字段' },
+  { key: 'dict', label: '数据字典' },
+  { key: 'audit', label: '审计日志' },
+]
+const govTab = ref('quality')
+const qualityLoading = ref(false)
+const qualityData = ref(null)
+const sensitiveLoading = ref(false)
+const sensitiveData = ref(null)
+const dictTable = ref('')
+const dictTables = ref([])
+const dictColumns = ref([])
+const dictLoading = ref(false)
+const dictExporting = ref(false)
+const auditRows = ref([])
+const auditTotal = ref(0)
+const auditPage = ref(1)
+const auditPageSize = ref(15)
+const auditPages = ref(1)
+const auditAction = ref('')
+const auditActions = ref([])
+const auditLoading = ref(false)
+
+const GOV_ACTION_LABELS = {
+  SWITCH_DATABASE: '切换数据库',
+  CREATE_TABLE: '创建表',
+  DROP_TABLE: '删除表',
+  ADD_COLUMN: '新增列',
+  DROP_COLUMN: '删除列',
+  RENUMBER_IDS: '重排编号',
+  INSERT_ROW: '插入行',
+  UPDATE_ROW: '更新行',
+  DELETE_ROW: '删除行',
+  SQL_EXECUTE: '执行 SQL',
+}
+
+const qualityScoreClass = computed(() => {
+  if (!qualityData.value) return ''
+  const s = qualityData.value.score
+  return s >= 90 ? 'good' : s >= 70 ? 'mid' : 'bad'
+})
+
+function levelLabel(level) {
+  return { error: '严重', warn: '警告', info: '提示', ok: '通过' }[level] || level
+}
+function riskLabel(level) {
+  return { high: '高危', medium: '中危', low: '低危' }[level] || level
+}
+function govActionLabel(action) {
+  return GOV_ACTION_LABELS[action] || action
+}
+function formatTime(v) {
+  if (!v) return '—'
+  const d = new Date(v)
+  return isNaN(d.getTime()) ? String(v) : d.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function runQuality() {
+  if (!selectedTable.value) return
+  qualityLoading.value = true
+  try {
+    const res = await apiFetch(`/governance/quality/${encodeURIComponent(selectedTable.value)}`)
+    const data = await res.json()
+    if (res.ok) qualityData.value = data
+    else alert(data.message || `检测失败（${res.status}）`)
+  } catch (e) {
+    alert(`请求失败：${e.message}`)
+  } finally {
+    qualityLoading.value = false
+  }
+}
+
+async function runSensitive() {
+  if (!selectedTable.value) return
+  sensitiveLoading.value = true
+  try {
+    const res = await apiFetch(`/governance/sensitive/${encodeURIComponent(selectedTable.value)}`)
+    const data = await res.json()
+    if (res.ok) sensitiveData.value = data
+    else alert(data.message || `扫描失败（${res.status}）`)
+  } catch (e) {
+    alert(`请求失败：${e.message}`)
+  } finally {
+    sensitiveLoading.value = false
+  }
+}
+
+async function fetchDictionary() {
+  if (!dictTable.value) { dictColumns.value = []; return }
+  dictLoading.value = true
+  try {
+    const res = await apiFetch(`/governance/dictionary?table=${encodeURIComponent(dictTable.value)}`)
+    const data = await res.json()
+    if (res.ok) {
+      dictTables.value = data.tables || []
+      dictColumns.value = data.columns || []
+    } else {
+      alert(data.message || `获取数据字典失败（${res.status}）`)
+    }
+  } catch (e) {
+    alert(`请求失败：${e.message}`)
+  } finally {
+    dictLoading.value = false
+  }
+}
+
+async function exportDictionary() {
+  dictExporting.value = true
+  try {
+    const res = await apiFetch('/governance/dictionary/export')
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert(err.message || `导出失败（${res.status}）`)
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `data-dictionary-${selectedDb.value || 'db'}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    alert(`导出失败：${e.message}`)
+  } finally {
+    dictExporting.value = false
+  }
+}
+
+function onGovTabChange(key) {
+  govTab.value = key
+  if (key === 'dict' && !dictTables.value.length) {
+    dictTable.value = dictTable.value || selectedTable.value
+    fetchDictionary()
+  }
+  if (key === 'audit' && !auditRows.value.length) {
+    fetchAudit()
+  }
+}
+
+async function fetchAudit() {
+  auditLoading.value = true
+  try {
+    const params = new URLSearchParams({
+      page: auditPage.value,
+      pageSize: auditPageSize.value,
+      action: auditAction.value,
+    })
+    const res = await apiFetch(`/governance/audit?${params}`)
+    const data = await res.json()
+    if (res.ok) {
+      auditRows.value = data.rows || []
+      auditTotal.value = data.total || 0
+      auditPages.value = data.totalPages || 1
+      auditActions.value = data.actions || []
+    } else {
+      alert(data.message || `查询审计日志失败（${res.status}）`)
+    }
+  } catch (e) {
+    alert(`请求失败：${e.message}`)
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+function onAuditFilter() {
+  auditPage.value = 1
+  fetchAudit()
+}
+
+function goAuditPage(p) {
+  auditPage.value = p
+  fetchAudit()
+}
+
+// ====================== 总览统计图表 ======================
+const govOverview = ref(null) // { tables: [{name, engine, approxRows, sizeKb, updateTime}], totalSizeKb }
+const rowsChartEl = ref(null)
+const sizeChartEl = ref(null)
+let rowsChart = null
+let sizeChart = null
+
+const CHART_COLORS = ['#2563eb', '#0ea5e9', '#818cf8', '#10b981', '#f59e0b', '#ef4444', '#a855f7', '#14b8a6']
+
+function fmtSize(kb) {
+  if (kb === null || kb === undefined) return '—'
+  if (kb < 1024) return `${kb} KB`
+  if (kb < 1024 * 1024) return `${(kb / 1024).toFixed(2)} MB`
+  return `${(kb / 1024 / 1024).toFixed(2)} GB`
+}
+
+async function fetchGovOverview() {
+  try {
+    const res = await apiFetch('/governance/overview')
+    if (res.ok) govOverview.value = await res.json()
+  } catch { /* 静默失败，图表区域保持为空 */ }
+  if (!selectedTable.value) {
+    await nextTick()
+    renderOverviewCharts()
+  }
+}
+
+function renderOverviewCharts() {
+  if (selectedTable.value || !govOverview.value) return
+  const list = tables.value
+  const ovTables = govOverview.value.tables || []
+
+  // 图一：各表行数（横向条形图，精确行数来自表列表）
+  if (rowsChartEl.value) {
+    const sorted = [...list].sort((a, b) => a.rowCount - b.rowCount)
+    const names = sorted.map((t) => t.name)
+    const counts = sorted.map((t) => t.rowCount)
+    if (!rowsChart) rowsChart = echarts.init(rowsChartEl.value)
+    rowsChart.setOption({
+      grid: { left: 8, right: 44, top: 10, bottom: 10, containLabel: true },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      xAxis: { type: 'value', splitLine: { lineStyle: { color: '#eef2f7' } } },
+      yAxis: {
+        type: 'category', data: names,
+        axisLabel: { color: '#475569', fontSize: 12.5 },
+        axisLine: { lineStyle: { color: '#e2e8f0' } }, axisTick: { show: false },
+      },
+      series: [{
+        type: 'bar', data: counts, barMaxWidth: 16,
+        itemStyle: {
+          borderRadius: [0, 4, 4, 0],
+          color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+            { offset: 0, color: '#60a5fa' }, { offset: 1, color: '#2563eb' },
+          ]),
+        },
+        label: { show: true, position: 'right', color: '#64748b', fontSize: 12 },
+      }],
+    }, true)
+  }
+
+  // 图二：各表存储空间占比（环形图，来自 information_schema）
+  if (sizeChartEl.value) {
+    const data = ovTables
+      .filter((t) => t.sizeKb > 0)
+      .sort((a, b) => b.sizeKb - a.sizeKb)
+      .map((t, i) => ({ name: t.name, value: t.sizeKb, itemStyle: { color: CHART_COLORS[i % CHART_COLORS.length] } }))
+    if (!sizeChart) sizeChart = echarts.init(sizeChartEl.value)
+    sizeChart.setOption({
+      tooltip: {
+        trigger: 'item',
+        formatter: (p) => `${p.name}：${fmtSize(p.value)}（${p.percent}%）`,
+      },
+      legend: { bottom: 0, type: 'scroll', icon: 'circle', textStyle: { color: '#64748b', fontSize: 12 }, pageIconSize: 10 },
+      series: [{
+        type: 'pie', radius: ['48%', '72%'], center: ['50%', '44%'],
+        data: data.length ? data : [{ name: '无数据', value: 1, itemStyle: { color: '#e2e8f0' } }],
+        label: { show: false },
+        itemStyle: { borderColor: '#fff', borderWidth: 2, borderRadius: 4 },
+      }],
+    }, true)
+  }
+}
+
+function handleChartResize() {
+  rowsChart?.resize()
+  sizeChart?.resize()
+}
+
+// 离开总览页时释放图表实例，返回时重建
+watch(selectedTable, (val) => {
+  if (val) {
+    rowsChart?.dispose(); rowsChart = null
+    sizeChart?.dispose(); sizeChart = null
+  } else {
+    nextTick(() => renderOverviewCharts())
+  }
+})
 
 const editableColumns = computed(() => {
   return tableStructure.value.filter((col) =>
@@ -656,6 +1131,7 @@ const totalRowCount = computed(() => {
 // ====================== 初始化 ======================
 onMounted(async () => {
   document.body.classList.add(BODY_FLAG)
+  window.addEventListener('resize', handleChartResize)
   // 权限检查
   const token = localStorage.getItem('admin_token')
   const expire = localStorage.getItem('expire')
@@ -673,6 +1149,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.body.classList.remove(BODY_FLAG)
+  window.removeEventListener('resize', handleChartResize)
+  rowsChart?.dispose()
+  sizeChart?.dispose()
 })
 
 // ====================== 表列表 ======================
@@ -748,6 +1227,7 @@ async function fetchTables() {
       const data = await res.json()
       tables.value = data.tables || []
       dbStatus.value = 'connected'
+      fetchGovOverview()
     } else {
       const err = await res.json()
       console.error('获取表列表失败:', err.message)
@@ -762,6 +1242,7 @@ async function fetchTables() {
 }
 
 function selectTable(name) {
+  sqlView.value = false
   if (!name) {
     selectedTable.value = ''
     sqlResult.value = null
@@ -777,6 +1258,10 @@ function selectTable(name) {
   tableSqlQuery.value = `SELECT * FROM \`${name}\` LIMIT 100`
   sqlResult.value = null
   sqlError.value = ''
+  // 重置数据治理状态（新表需重新检测）
+  govTab.value = 'quality'
+  qualityData.value = null
+  sensitiveData.value = null
   fetchTableStructure()
   fetchTableData()
 }
@@ -847,6 +1332,21 @@ function onSearchInput() {
 }
 
 // ====================== SQL 执行 ======================
+// 打开独立 SQL 编辑器视图
+function openSqlView() {
+  selectedTable.value = ''
+  sqlView.value = true
+  sqlResult.value = null
+  sqlError.value = ''
+}
+
+// 清空编辑器与结果
+function clearSqlEditor() {
+  sqlQuery.value = ''
+  sqlResult.value = null
+  sqlError.value = ''
+}
+
 async function runSql() {
   if (!sqlQuery.value.trim()) return
   runningSql.value = true
@@ -1215,8 +1715,9 @@ function handleLogout() {
 </script>
 
 <style scoped>
-/* 仅在 body 带有管理页标记时隐藏 VitePress 底部 footer（样式泄漏安全） */
-:global(body.dbm-dashboard-active .VPFooter) { display: none !important; }
+/* 仅在 body 带有管理页标记时隐藏 VitePress 底部 footer 与大纲遮罩（样式泄漏安全） */
+:global(body.dbm-dashboard-active .VPFooter),
+:global(body.dbm-dashboard-active .aside-curtain) { display: none !important; }
 
 /* ========== 容器布局 ========== */
 .mgmt-container {
@@ -1249,8 +1750,21 @@ function handleLogout() {
   border-bottom: 1px solid #334155;
 }
 
-.brand-icon { font-size: 24px; }
-.brand-text { font-size: 17px; font-weight: 700; color: #f1f5f9; }
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #3b82f6, #1e40af);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+.brand-logo svg { width: 19px; height: 19px; }
+.brand-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.brand-text { font-size: 15px; font-weight: 700; color: #f1f5f9; letter-spacing: 0.5px; white-space: nowrap; }
 
 /* 数据库选择器 */
 .db-selector {
@@ -1270,10 +1784,20 @@ function handleLogout() {
   transition: all 0.15s;
 }
 .db-current:hover { border-color: #60a5fa; }
+.db-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .db-label {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #64748b;
+}
+.db-name {
+  font-size: 14px;
+  font-weight: 600;
   color: #e2e8f0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .db-arrow {
   font-size: 14px;
@@ -1330,6 +1854,22 @@ function handleLogout() {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
+/* 主导航（总览 / SQL 编辑器） */
+.side-nav {
+  flex-shrink: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid #334155;
+}
+.nav-icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nav-icon svg { width: 15px; height: 15px; }
 
 /* 表列表 */
 .sidebar-section {
@@ -1396,7 +1936,6 @@ function handleLogout() {
   color: #60a5fa;
   border-left-color: #60a5fa;
 }
-.table-icon { font-size: 16px; flex-shrink: 0; }
 .table-name-text {
   flex: 1;
   overflow: hidden;
@@ -1520,6 +2059,9 @@ function handleLogout() {
   font-weight: 700;
   color: #1e293b;
   margin-bottom: 16px;
+  /* 重置 VitePress .vp-doc h2 的分隔线与内边距 */
+  border: none;
+  padding: 0;
 }
 
 /* ========== SQL 编辑器 ========== */
@@ -1530,6 +2072,16 @@ function handleLogout() {
   margin-bottom: 24px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
 }
+/* 独立 SQL 编辑器视图 */
+.sql-view-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.sql-editor-tall { min-height: 260px; }
+.sql-view .sql-result-table-wrap .table-wrap { max-height: 480px; }
 .sql-editor {
   width: 100%;
   padding: 14px;
@@ -1634,9 +2186,34 @@ function handleLogout() {
   text-align: center;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
 }
-.ov-icon { font-size: 32px; margin-bottom: 8px; }
 .ov-value { font-size: 28px; font-weight: 700; color: #1e293b; }
+.ov-value.ov-sm { font-size: 20px; line-height: 28px; }
+.ov-value.ov-ok { color: #16a34a; }
+.ov-value.ov-bad { color: #dc2626; }
 .ov-label { font-size: 14px; color: #64748b; margin-top: 4px; }
+
+/* ========== 总览统计图表 ========== */
+.overview-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+.chart-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px 12px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.chart-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 8px;
+  border: none;
+  padding: 0;
+}
+.chart-body { height: 300px; }
 
 /* ========== 表视图 ========== */
 .table-view { animation: panelIn 0.2s ease; }
@@ -1652,10 +2229,12 @@ function handleLogout() {
   margin-bottom: 16px;
 }
 .table-name-title {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   color: #1e293b;
   margin: 0;
+  border: none;
+  padding: 0;
 }
 .btn-refresh {
   padding: 7px 16px;
@@ -1998,4 +2577,166 @@ code { font-family: 'Consolas', monospace; font-size: 13px; background: #f1f5f9;
   border-radius: 8px;
   font-size: 14px;
 }
+
+/* ========== 数据治理 ========== */
+.gov-subnav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.gov-subitem {
+  padding: 9px 18px;
+  font-size: 14px;
+  color: #64748b;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+  user-select: none;
+}
+.gov-subitem:hover { color: #334155; }
+.gov-subitem.active {
+  color: #1d4ed8;
+  border-bottom-color: #1d4ed8;
+  font-weight: 600;
+}
+
+.gov-section { animation: panelIn 0.2s ease; }
+.gov-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.gov-hint { font-size: 13px; color: #94a3b8; }
+.gov-select {
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #1e293b;
+  background: #fff;
+  outline: none;
+  min-width: 220px;
+  cursor: pointer;
+}
+.gov-select:focus { border-color: #60a5fa; }
+.gov-table { margin-bottom: 8px; }
+.gov-empty {
+  background: #fff;
+  border-radius: 12px;
+  padding: 48px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+
+/* 质量评分摘要 */
+.quality-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.quality-score-box {
+  flex-shrink: 0;
+  width: 92px;
+  height: 92px;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.quality-score-box.good { background: #f0fdf4; border-color: #bbf7d0; }
+.quality-score-box.good .quality-score { color: #16a34a; }
+.quality-score-box.mid { background: #fffbeb; border-color: #fde68a; }
+.quality-score-box.mid .quality-score { color: #d97706; }
+.quality-score-box.bad { background: #fef2f2; border-color: #fecaca; }
+.quality-score-box.bad .quality-score { color: #dc2626; }
+.quality-score { font-size: 30px; font-weight: 700; color: #1e293b; line-height: 1.1; }
+.quality-score-label { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+.quality-meta { flex-shrink: 0; padding-top: 6px; }
+.q-meta-row { font-size: 14px; color: #475569; margin-bottom: 8px; }
+.issue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.issue-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  line-height: 1.5;
+}
+.issue-item.ok { color: #16a34a; background: #f0fdf4; border-color: #bbf7d0; }
+.issue-item.error { background: #fef2f2; border-color: #fecaca; }
+.issue-item.warn { background: #fffbeb; border-color: #fde68a; }
+.issue-level {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: #fff;
+}
+.issue-item.error .issue-level { background: #dc2626; }
+.issue-item.warn .issue-level { background: #d97706; }
+.issue-item.info .issue-level { background: #64748b; }
+
+/* 风险等级徽标 */
+.risk-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  color: #fff;
+}
+.risk-badge.high { background: #dc2626; }
+.risk-badge.medium { background: #d97706; }
+.risk-badge.low { background: #2563eb; }
+
+.dict-comment { color: #64748b; }
+
+/* 审计日志 */
+.audit-time { white-space: nowrap; color: #475569; }
+.audit-action {
+  font-size: 12px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1d4ed8;
+  padding: 2px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.audit-target { font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; }
+.audit-detail {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #64748b;
+}
+.audit-ip { color: #94a3b8; font-size: 13px; }
 </style>
