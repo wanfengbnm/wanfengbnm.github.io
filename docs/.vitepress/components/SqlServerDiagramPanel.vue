@@ -262,6 +262,8 @@ const submit = async () => {
   }
 };
 
+const emit = defineEmits(['go-viz']);
+
 const navigateToViz = () => {
   sessionStorage.setItem('sqlserver_connection', JSON.stringify({
     server: form.value.server.trim(),
@@ -271,7 +273,7 @@ const navigateToViz = () => {
     password: form.value.password,
     instanceName: form.value.instanceName.trim(),
   }));
-  window.location.href = '/DataVisualization/';
+  emit('go-viz');
 };
 
 const openZoom = () => {
@@ -324,7 +326,7 @@ onBeforeUnmount(() => {
           <span class="sql-info-icon" title="该功能目前仅用于帮助开发者观察数据库内部数据，后台不会存储所输入的数据库信息">!</span>
         </p>
         <h2 id="sql-panel-title">SQL Server 数据库可视化</h2>
-        <p class="sql-panel__desc">输入数据库连接信息后，请求后端生成结构图，并直接渲染到首页下方。</p>
+        <p class="sql-panel__desc">输入数据库连接信息后，请求后端生成结构图，并直接渲染到预览区。</p>
       </div>
       <div class="sql-panel__badge">支持图片 / SVG 返回</div>
     </div>

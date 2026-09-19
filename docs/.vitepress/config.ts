@@ -101,6 +101,10 @@ export default defineConfig({
         link: '/TaskLog/'
       },
       {
+        text: '数据库可视化',
+        link: '/Tools/'
+      },
+      {
         text: '日常问题',
         activeMatch: '/DailyProblem/',
         link: '/DailyProblem/'

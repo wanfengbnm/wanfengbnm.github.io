@@ -3,7 +3,7 @@ layout: page
 ---
 
 <script setup>
-import index from './index.vue'
+import tools from './index.vue'
 </script>
 
-<index />
+<tools />

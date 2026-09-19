@@ -1,8 +1,11 @@
 <template>
   <div v-if="authReady" class="mgmt-container">
 
-      <!-- ==================== 侧边栏 ==================== -->
-      <aside class="mgmt-sidebar">
+    <!-- 移动端抽屉遮罩 -->
+    <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen = false"></div>
+
+    <!-- ==================== 侧边栏 ==================== -->
+    <aside class="mgmt-sidebar" :class="{ open: sidebarOpen }">
         <div class="sidebar-brand">
           <div class="brand-logo">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -99,6 +102,7 @@
 
       <!-- 顶部工具栏 -->
       <div class="main-toolbar">
+        <button class="toolbar-menu" aria-label="切换菜单" @click="sidebarOpen = !sidebarOpen">☰</button>
         <span class="main-title" v-if="selectedTable">{{ selectedTable }}</span>
         <span class="main-title" v-else>总览</span>
         <div class="main-toolbar-right">
@@ -888,6 +892,7 @@ const deleteRowData = ref(null)
 const deleting = ref(false)
 const exporting = ref(false)
 const modalError = ref('')
+const sidebarOpen = ref(false) // 移动端抽屉侧边栏
 
 // SQL 执行历史（localStorage 持久化，最近 30 条）
 const sqlHistory = ref(loadSqlHistory())
@@ -1281,12 +1286,6 @@ let usabilityChart = null
 let fillHeatmap = null
 let corrHeatmap = null
 
-function openAnalysisView() {
-  selectedTable.value = ''
-  sqlView.value = false
-  analysisView.value = true
-}
-
 function toggleAnalysisTable(name) {
   const arr = analysisSelected.value
   const i = arr.indexOf(name)
@@ -1628,6 +1627,7 @@ async function fetchTables() {
 function selectTable(name) {
   sqlView.value = false
   analysisView.value = false
+  sidebarOpen.value = false
   if (!name) {
     selectedTable.value = ''
     sqlResult.value = null
@@ -1722,8 +1722,17 @@ function openSqlView() {
   selectedTable.value = ''
   sqlView.value = true
   analysisView.value = false
+  sidebarOpen.value = false
   sqlResult.value = null
   sqlError.value = ''
+}
+
+// 打开数据分析视图
+function openAnalysisView() {
+  selectedTable.value = ''
+  sqlView.value = false
+  analysisView.value = true
+  sidebarOpen.value = false
 }
 
 // 清空编辑器与结果
@@ -1791,6 +1800,7 @@ async function runTableSql() {
 
 // ====================== 创建表 ======================
 function openCreateTable() {
+  sidebarOpen.value = false
   newTable.value = {
     name: '',
     columns: [{ name: '', type: 'VARCHAR(255)', pk: false, autoInc: false, nullable: true, default: null }],
@@ -3100,6 +3110,71 @@ code { font-family: 'Consolas', monospace; font-size: 13px; background: #f1f5f9;
   color: #dc2626;
   border-radius: 8px;
   font-size: 14px;
+}
+
+/* ========== 移动端 / 平板适配 ========== */
+.toolbar-menu { display: none; }
+.sidebar-backdrop { display: none; }
+
+@media (max-width: 900px) {
+  .toolbar-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    margin-right: 12px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .toolbar-menu:active { background: #f1f5f9; }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    top: var(--vp-nav-height, 64px);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 55;
+  }
+  .mgmt-sidebar {
+    position: fixed;
+    top: var(--vp-nav-height, 64px);
+    bottom: 0;
+    left: 0;
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+  .mgmt-sidebar.open {
+    transform: translateX(0);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  }
+  .main-toolbar { padding: 12px 16px; gap: 10px; flex-wrap: wrap; }
+  .main-title { font-size: 17px; }
+  .mgmt-content-area { padding: 16px 14px; }
+  .tab-bar { overflow-x: auto; }
+  .gov-subnav { overflow-x: auto; }
+  .toolbar { flex-wrap: wrap; }
+  .overview-cards { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .analysis-grid { grid-template-columns: 1fr; }
+  .pagination { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .main-toolbar-right .btn-refresh-top,
+  .main-toolbar-right .btn-logout-top { padding: 6px 10px; font-size: 13px; }
+  .toolbar .btn-primary,
+  .toolbar .btn-secondary,
+  .page-size-select { padding: 8px 12px; font-size: 13px; }
+  .search-input { min-width: 0; }
+  .modal { padding: 20px 16px; }
 }
 
 /* ========== 数据治理 ========== */
