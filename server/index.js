@@ -799,6 +799,150 @@ app.get('/api/mysql/governance/overview', async (req, res) => {
   } catch (e) { res.status(500).json({ message: `获取总览统计失败：${e.message}` }); }
 });
 
+// 数据分析：多表整合分析（可用性 / 填充率 / 数值统计 / 字段相关性 / 跨表关联字段）
+const GOV_NUMERIC_RE = /^(int|tinyint|smallint|mediumint|bigint|decimal|numeric|float|double)/i;
+
+// Pearson 相关系数（成对剔除空值，有效样本 <10 返回 null）
+function pearsonCorrelation(pairs) {
+  const pts = pairs.filter(([x, y]) => x !== null && y !== null && Number.isFinite(x) && Number.isFinite(y));
+  const n = pts.length;
+  if (n < 10) return null;
+  let sx = 0, sy = 0;
+  for (const [x, y] of pts) { sx += x; sy += y; }
+  const mx = sx / n, my = sy / n;
+  let num = 0, dx2 = 0, dy2 = 0;
+  for (const [x, y] of pts) {
+    const dx = x - mx, dy = y - my;
+    num += dx * dy; dx2 += dx * dx; dy2 += dy * dy;
+  }
+  const den = Math.sqrt(dx2 * dy2);
+  return den === 0 ? null : Number((num / den).toFixed(3));
+}
+
+app.post('/api/mysql/analysis', async (req, res) => {
+  const raw = Array.isArray(req.body?.tables) ? req.body.tables.map(String) : [];
+  const tableList = [...new Set(raw)];
+  if (tableList.length === 0 || tableList.length > 8) return res.status(400).json({ message: '请选择 1-8 张表。' });
+  for (const t of tableList) {
+    if (!isSafeIdent(t)) return res.status(400).json({ message: `表名 "${t}" 不合法。` });
+  }
+  // 可选：每表指定参与分析的字段（与实际字段求交集）
+  const fieldsReq = {};
+  if (req.body?.fields && typeof req.body.fields === 'object' && !Array.isArray(req.body.fields)) {
+    for (const [k, v] of Object.entries(req.body.fields)) {
+      if (Array.isArray(v)) fieldsReq[k] = v.map(String);
+    }
+  }
+  try {
+    const [sizeRows] = await req.dbPool.query(
+      'SELECT TABLE_NAME, DATA_LENGTH, INDEX_LENGTH FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN (?)',
+      [req.dbName, tableList]
+    );
+    const sizeMap = new Map(sizeRows.map((r) => [r.TABLE_NAME, Number((((Number(r.DATA_LENGTH) || 0) + (Number(r.INDEX_LENGTH) || 0)) / 1024).toFixed(1))]));
+
+    const SKIP_ROWS = 200000;
+    const tables = [], fillRates = [], numericStats = [], correlations = [];
+    const colFillMap = new Map(); // 字段名 -> [{table, type, fillRate}]
+
+    for (const t of tableList) {
+      const tName = backtick(t);
+      const [cols] = await req.dbPool.query(`DESCRIBE ${tName}`);
+      const wanted = fieldsReq[t];
+      let colList = Array.isArray(wanted) && wanted.length
+        ? cols.filter((c) => wanted.includes(c.Field))
+        : cols;
+      colList = colList.slice(0, 15);
+      const [[{ total }]] = await req.dbPool.query(`SELECT COUNT(*) AS total FROM ${tName}`);
+      const totalRows = Number(total);
+      const tableEntry = {
+        name: t, rows: totalRows, columnCount: cols.length,
+        hasPK: cols.some((c) => c.Key === 'PRI'),
+        sizeKb: sizeMap.get(t) ?? 0, completeness: null,
+      };
+      tables.push(tableEntry);
+
+      if (totalRows > 0 && totalRows <= SKIP_ROWS && colList.length > 0) {
+        const parts = [];
+        const numericCols = [];
+        for (const c of colList) {
+          const b = backtick(c.Field);
+          parts.push(`SUM(${b} IS NULL) AS ${backtick('null_' + c.Field)}`);
+          if (GOV_NUMERIC_RE.test(c.Type)) {
+            numericCols.push(c.Field);
+            parts.push(`MIN(${b}) AS ${backtick('min_' + c.Field)}, MAX(${b}) AS ${backtick('max_' + c.Field)}, AVG(${b}) AS ${backtick('avg_' + c.Field)}`);
+          }
+        }
+        const [[agg]] = await req.dbPool.query(`SELECT ${parts.join(', ')} FROM ${tName}`);
+        let nullCells = 0;
+        for (const c of colList) {
+          const nullCount = Number(agg[`null_${c.Field}`] || 0);
+          nullCells += nullCount;
+          fillRates.push({ table: t, column: c.Field, fillRate: Number((1 - nullCount / totalRows).toFixed(4)), nullCount });
+          const arr = colFillMap.get(c.Field) || [];
+          arr.push({ table: t, type: c.Type, fillRate: Number((1 - nullCount / totalRows).toFixed(4)) });
+          colFillMap.set(c.Field, arr);
+        }
+        tableEntry.completeness = Number((1 - nullCells / (totalRows * colList.length)).toFixed(4));
+
+        for (const name of numericCols) {
+          const avgRaw = agg[`avg_${name}`];
+          numericStats.push({
+            table: t, column: name,
+            min: agg[`min_${name}`] ?? null, max: agg[`max_${name}`] ?? null,
+            avg: avgRaw === null ? null : Number(Number(avgRaw).toFixed(3)),
+          });
+        }
+
+        // 数值字段 Pearson 相关性（采样 ≤2000 行）
+        if (numericCols.length >= 2 && totalRows >= 10) {
+          const sampleCols = numericCols.slice(0, 8);
+          const sel = sampleCols.map((c) => `${backtick(c)} AS ${backtick('v_' + c)}`).join(', ');
+          const [srows] = await req.dbPool.query(`SELECT ${sel} FROM ${tName} LIMIT 2000`);
+          const series = sampleCols.map((c) => srows.map((r) => {
+            const v = Number(r['v_' + c]);
+            return Number.isFinite(v) ? v : null;
+          }));
+          const matrix = sampleCols.map((_, i) => sampleCols.map((_, j) =>
+            i === j ? 1 : pearsonCorrelation(series[i].map((v, k) => [v, series[j][k]]))));
+          correlations.push({ table: t, columns: sampleCols, matrix, sampleRows: srows.length });
+        }
+      } else if (totalRows > SKIP_ROWS) {
+        // 大表跳过逐字段扫描，仅保留结构信息
+        for (const c of colList) fillRates.push({ table: t, column: c.Field, fillRate: null, nullCount: null });
+      }
+    }
+
+    // 跨表关联字段：同名列出现在 ≥2 张选中表
+    const sharedColumns = [];
+    for (const [column, arr] of colFillMap) {
+      if (arr.length < 2) continue;
+      const entry = { column, tables: arr.map((a) => a.table), fills: arr.map((a) => ({ table: a.table, fillRate: a.fillRate })), valueOverlap: null };
+      const [s1, s2] = arr;
+      const bothString = GOV_STRING_TYPES.some((x) => s1.type.toLowerCase().includes(x))
+        && GOV_STRING_TYPES.some((x) => s2.type.toLowerCase().includes(x));
+      if (bothString) {
+        try {
+          const cb = backtick(column);
+          const cond = `${cb} IS NOT NULL AND ${cb} != ''`;
+          const [ra] = await req.dbPool.query(`SELECT DISTINCT ${cb} AS v FROM ${backtick(s1.table)} WHERE ${cond} LIMIT 300`);
+          const [rb] = await req.dbPool.query(`SELECT DISTINCT ${cb} AS v FROM ${backtick(s2.table)} WHERE ${cond} LIMIT 300`);
+          const setA = new Set(ra.map((r) => String(r.v)));
+          const setB = new Set(rb.map((r) => String(r.v)));
+          let inter = 0;
+          for (const v of setA) if (setB.has(v)) inter++;
+          const union = new Set([...setA, ...setB]).size;
+          entry.valueOverlap = { tables: [s1.table, s2.table], ratio: union ? Number((inter / union).toFixed(3)) : 0, sampled: [setA.size, setB.size] };
+        } catch { /* 重叠采样失败不阻断 */ }
+      }
+      sharedColumns.push(entry);
+      if (sharedColumns.length >= 6) break;
+    }
+
+    await writeAudit(req, 'ANALYZE', req.dbName, tableList.join(','));
+    res.json({ tables, fillRates, numericStats, correlations, sharedColumns });
+  } catch (e) { res.status(500).json({ message: `数据分析失败：${e.message}` }); }
+});
+
 // 审计日志查询（集中存储于默认库，与 X-Database 无关）
 app.get('/api/mysql/governance/audit', async (req, res) => {
   if (!(await ensureAuditTable())) return res.status(500).json({ message: '审计表初始化失败，请检查默认数据库连接。' });

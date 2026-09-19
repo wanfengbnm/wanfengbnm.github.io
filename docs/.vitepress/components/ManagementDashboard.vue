@@ -33,7 +33,7 @@
 
       <!-- 主导航 -->
       <nav class="side-nav">
-        <div class="table-item" :class="{ active: !selectedTable && !sqlView }" @click="selectTable('')">
+        <div class="table-item" :class="{ active: !selectedTable && !sqlView && !analysisView }" @click="selectTable('')">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
@@ -48,6 +48,14 @@
             </svg>
           </span>
           <span class="table-name-text">SQL 编辑器</span>
+        </div>
+        <div class="table-item" :class="{ active: analysisView }" @click="openAnalysisView">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+            </svg>
+          </span>
+          <span class="table-name-text">数据分析</span>
         </div>
       </nav>
 
@@ -156,6 +164,140 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- ===== 数据分析视图 ===== -->
+      <div v-else-if="analysisView" class="analysis-view">
+        <div class="analysis-picker">
+          <div class="sql-view-head">
+            <h2 class="card-title">数据分析</h2>
+            <span class="gov-hint">当前数据库：{{ selectedDb || '—' }} · 选择表与字段，整合后生成可用性与关联分析图表</span>
+          </div>
+
+          <div class="analysis-step">
+            <span class="step-badge">1</span>
+            <span class="step-title">选择数据表</span>
+            <span class="gov-hint">最多 8 张</span>
+          </div>
+          <div class="analysis-checks" v-if="tables.length">
+            <label
+              v-for="t in tables"
+              :key="t.name"
+              class="analysis-check"
+              :class="{ checked: analysisSelected.includes(t.name) }"
+            >
+              <input type="checkbox" :checked="analysisSelected.includes(t.name)" @change="toggleAnalysisTable(t.name)" />
+              <span class="analysis-check-name">{{ t.name }}</span>
+              <span class="analysis-check-count">{{ t.rowCount }} 行</span>
+            </label>
+          </div>
+          <div v-else class="analysis-no-table">当前数据库没有数据表</div>
+
+          <template v-if="analysisSelected.length">
+            <div class="analysis-step">
+              <span class="step-badge">2</span>
+              <span class="step-title">选择分析字段</span>
+              <span class="gov-hint">默认全选（每表最多 15 个字段），可按需取消；字段全部取消的表不参与分析</span>
+            </div>
+            <div class="field-groups">
+              <div v-for="t in analysisSelected" :key="t" class="field-group">
+                <div class="field-group-head">
+                  <span class="field-group-name">{{ t }}</span>
+                  <button class="field-group-link" @click="selectAllFields(t, true)">全选</button>
+                  <button class="field-group-link" @click="selectAllFields(t, false)">清空</button>
+                  <span class="gov-hint">已选 {{ (selectedFields[t] || []).length }} / {{ (fieldOptions[t] || []).length }}</span>
+                </div>
+                <div class="field-pills">
+                  <button
+                    v-for="c in (fieldOptions[t] || [])"
+                    :key="c.name"
+                    class="field-pill"
+                    :class="{ active: (selectedFields[t] || []).includes(c.name) }"
+                    @click="toggleAnalysisField(t, c.name)"
+                  >{{ c.name }}<span v-if="c.key === 'PRI'" class="pill-pk">PK</span></button>
+                  <span v-if="!(fieldOptions[t] || []).length" class="gov-hint">字段加载中...</span>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <div class="analysis-toolbar">
+            <button class="btn-primary" @click="runAnalysis" :disabled="analysisRunning || !analysisSelected.length">
+              {{ analysisRunning ? '分析中...' : '生成分析报告' }}
+            </button>
+            <button class="btn-secondary" v-if="analysisSelected.length" @click="resetAnalysisSelection">重选</button>
+            <span class="gov-hint" v-if="!analysisSelected.length">请至少选择一张表</span>
+          </div>
+        </div>
+
+        <template v-if="analysisResult">
+          <div class="analysis-grid">
+            <div class="chart-card">
+              <h3 class="chart-title">数据可用性评分对比（字段完整率）</h3>
+              <div ref="usabilityChartEl" class="chart-body"></div>
+            </div>
+            <div class="chart-card">
+              <h3 class="chart-title">字段填充率热力图</h3>
+              <div ref="fillHeatmapEl" class="chart-body chart-body-tall"></div>
+            </div>
+          </div>
+
+          <div v-if="analysisResult.correlations.length" class="chart-card analysis-block">
+            <div class="corr-head">
+              <h3 class="chart-title">数值字段相关性（Pearson）</h3>
+              <select v-if="analysisResult.correlations.length > 1" v-model="corrTable" class="gov-select corr-select" @change="renderCorrChart">
+                <option v-for="c in analysisResult.correlations" :key="c.table" :value="c.table">{{ c.table }}</option>
+              </select>
+            </div>
+            <div ref="corrHeatmapEl" class="chart-body"></div>
+          </div>
+
+          <div v-if="analysisResult.sharedColumns.length" class="chart-card analysis-block">
+            <h3 class="chart-title">跨表关联字段（同名列）</h3>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr><th>字段</th><th>出现表</th><th>各表填充率</th><th>值重叠度</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="s in analysisResult.sharedColumns" :key="s.column">
+                    <td class="col-name">{{ s.column }}</td>
+                    <td>{{ s.tables.join('、') }}</td>
+                    <td>{{ s.fills.map((f) => f.table + ' ' + (f.fillRate * 100).toFixed(0) + '%').join(' · ') }}</td>
+                    <td>
+                      <template v-if="s.valueOverlap">
+                        {{ (s.valueOverlap.ratio * 100).toFixed(1) }}%
+                        <span class="gov-hint">（采样 {{ s.valueOverlap.sampled.join(' vs ') }}）</span>
+                      </template>
+                      <span v-else>—</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div v-if="analysisResult.numericStats.length" class="chart-card analysis-block">
+            <h3 class="chart-title">数值字段统计</h3>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr><th>表</th><th>字段</th><th>最小值</th><th>最大值</th><th>平均值</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(s, si) in analysisResult.numericStats" :key="si">
+                    <td class="col-name">{{ s.table }}</td>
+                    <td class="col-name">{{ s.column }}</td>
+                    <td>{{ s.min ?? '—' }}</td>
+                    <td>{{ s.max ?? '—' }}</td>
+                    <td>{{ s.avg ?? '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+        <div v-else-if="!analysisRunning" class="gov-empty">选择表后点击“生成分析报告”</div>
       </div>
 
       <!-- ===== 未选中表：总览统计 ===== -->
@@ -691,6 +833,7 @@ const overviewStatus = computed(() => {
 const tables = ref([])
 const tableFilter = ref('')
 const sqlView = ref(false) // 独立 SQL 编辑器视图
+const analysisView = ref(false) // 数据分析视图
 const filteredTables = computed(() => {
   const kw = tableFilter.value.trim().toLowerCase()
   if (!kw) return tables.value
@@ -1057,7 +1200,8 @@ function renderOverviewCharts() {
     const sorted = [...list].sort((a, b) => a.rowCount - b.rowCount)
     const names = sorted.map((t) => t.name)
     const counts = sorted.map((t) => t.rowCount)
-    if (!rowsChart) rowsChart = echarts.init(rowsChartEl.value)
+    rowsChart?.dispose()
+    rowsChart = echarts.init(rowsChartEl.value)
     rowsChart.setOption({
       grid: { left: 8, right: 44, top: 10, bottom: 10, containLabel: true },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -1086,7 +1230,8 @@ function renderOverviewCharts() {
       .filter((t) => t.sizeKb > 0)
       .sort((a, b) => b.sizeKb - a.sizeKb)
       .map((t, i) => ({ name: t.name, value: t.sizeKb, itemStyle: { color: CHART_COLORS[i % CHART_COLORS.length] } }))
-    if (!sizeChart) sizeChart = echarts.init(sizeChartEl.value)
+    sizeChart?.dispose()
+    sizeChart = echarts.init(sizeChartEl.value)
     sizeChart.setOption({
       tooltip: {
         trigger: 'item',
@@ -1106,17 +1251,248 @@ function renderOverviewCharts() {
 function handleChartResize() {
   rowsChart?.resize()
   sizeChart?.resize()
+  usabilityChart?.resize()
+  fillHeatmap?.resize()
+  corrHeatmap?.resize()
 }
 
-// 离开总览页时释放图表实例，返回时重建
-watch(selectedTable, (val) => {
-  if (val) {
+// 视图切换时释放总览图表实例，回到总览时重建（避免实例绑定已被 Vue 销毁的旧 DOM）
+watch([selectedTable, sqlView, analysisView], () => {
+  const onOverview = !selectedTable.value && !sqlView.value && !analysisView.value
+  if (!onOverview) {
     rowsChart?.dispose(); rowsChart = null
     sizeChart?.dispose(); sizeChart = null
   } else {
     nextTick(() => renderOverviewCharts())
   }
 })
+
+// ====================== 数据分析 ======================
+const analysisSelected = ref([])
+const analysisRunning = ref(false)
+const analysisResult = ref(null)
+const fieldOptions = ref({})  // 表 -> [{name, type, key}]
+const selectedFields = ref({}) // 表 -> [字段名]
+const corrTable = ref('')
+const usabilityChartEl = ref(null)
+const fillHeatmapEl = ref(null)
+const corrHeatmapEl = ref(null)
+let usabilityChart = null
+let fillHeatmap = null
+let corrHeatmap = null
+
+function openAnalysisView() {
+  selectedTable.value = ''
+  sqlView.value = false
+  analysisView.value = true
+}
+
+function toggleAnalysisTable(name) {
+  const arr = analysisSelected.value
+  const i = arr.indexOf(name)
+  if (i >= 0) {
+    arr.splice(i, 1)
+    delete selectedFields.value[name]
+    delete fieldOptions.value[name]
+  } else if (arr.length < 8) {
+    arr.push(name)
+    // 拉取表结构以列出可选字段（服务端有 5 秒缓存）
+    if (!fieldOptions.value[name]) {
+      apiFetch(`/tables/${encodeURIComponent(name)}`)
+        .then(async (res) => {
+          if (!res.ok) return
+          const data = await res.json()
+          const cols = (data.columns || []).slice(0, 15).map((c) => ({ name: c.name, type: c.type, key: c.key }))
+          fieldOptions.value[name] = cols
+          // 默认全选（排除表中已不存在的旧选择）
+          const prev = selectedFields.value[name]
+          selectedFields.value[name] = prev
+            ? cols.filter((c) => prev.includes(c.name)).map((c) => c.name)
+            : cols.map((c) => c.name)
+        })
+        .catch(() => {})
+    }
+  }
+}
+
+function toggleAnalysisField(table, field) {
+  const arr = selectedFields.value[table] || []
+  const i = arr.indexOf(field)
+  if (i >= 0) arr.splice(i, 1)
+  else arr.push(field)
+}
+
+function selectAllFields(table, on) {
+  selectedFields.value[table] = on ? (fieldOptions.value[table] || []).map((c) => c.name) : []
+}
+
+function resetAnalysisSelection() {
+  analysisSelected.value = []
+  selectedFields.value = {}
+  fieldOptions.value = {}
+}
+
+async function runAnalysis() {
+  if (!analysisSelected.value.length) return
+  // 字段全部被取消的表不参与分析
+  const tablesPayload = []
+  const fieldsPayload = {}
+  for (const t of analysisSelected.value) {
+    const sel = selectedFields.value[t]
+    if (Array.isArray(sel) && sel.length === 0) continue
+    tablesPayload.push(t)
+    if (Array.isArray(sel) && sel.length) fieldsPayload[t] = sel
+  }
+  if (!tablesPayload.length) {
+    alert('请至少为一张表保留分析字段')
+    return
+  }
+  analysisRunning.value = true
+  try {
+    const res = await apiFetch('/analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tables: tablesPayload, fields: fieldsPayload }),
+    })
+    const data = await res.json()
+    if (res.ok) {
+      analysisResult.value = data
+      corrTable.value = data.correlations[0]?.table || ''
+      await nextTick()
+      renderAnalysisCharts()
+    } else {
+      alert(data.message || `分析失败（${res.status}）`)
+    }
+  } catch (e) {
+    alert(`请求失败：${e.message}`)
+  } finally {
+    analysisRunning.value = false
+  }
+}
+
+function disposeAnalysisCharts() {
+  usabilityChart?.dispose(); usabilityChart = null
+  fillHeatmap?.dispose(); fillHeatmap = null
+  corrHeatmap?.dispose(); corrHeatmap = null
+}
+
+watch(analysisView, (val) => {
+  if (!val) {
+    disposeAnalysisCharts()
+  } else if (analysisResult.value) {
+    // 返回分析视图时用已有结果重建图表
+    nextTick(() => { renderAnalysisCharts(); renderCorrChart() })
+  }
+})
+
+function renderAnalysisCharts() {
+  const R = analysisResult.value
+  if (!R) return
+
+  // 可用性评分（字段完整率）横向条形图
+  if (usabilityChartEl.value) {
+    const rows = R.tables
+      .filter((t) => t.completeness !== null)
+      .map((t) => ({ name: t.name, value: Math.round(t.completeness * 1000) / 10 }))
+      .sort((a, b) => a.value - b.value)
+    usabilityChart?.dispose()
+    usabilityChart = echarts.init(usabilityChartEl.value)
+    usabilityChart.setOption({
+      grid: { left: 8, right: 56, top: 10, bottom: 10, containLabel: true },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (v) => v + '%' },
+      xAxis: { type: 'value', max: 100, splitLine: { lineStyle: { color: '#eef2f7' } } },
+      yAxis: {
+        type: 'category', data: rows.map((r) => r.name),
+        axisLabel: { color: '#475569', fontSize: 12.5 },
+        axisLine: { lineStyle: { color: '#e2e8f0' } }, axisTick: { show: false },
+      },
+      series: [{
+        type: 'bar', barMaxWidth: 16,
+        data: rows.map((r) => ({
+          value: r.value,
+          itemStyle: { borderRadius: [0, 4, 4, 0], color: r.value >= 95 ? '#22c55e' : r.value >= 85 ? '#f59e0b' : '#ef4444' },
+        })),
+        label: { show: true, position: 'right', color: '#64748b', fontSize: 12, formatter: '{c}%' },
+      }],
+    }, true)
+  }
+
+  // 字段填充率热力图（行：字段并集，列：表）
+  if (fillHeatmapEl.value) {
+    const tableNames = R.tables.map((t) => t.name)
+    const colSet = []
+    for (const f of R.fillRates) if (!colSet.includes(f.column)) colSet.push(f.column)
+    const cols = colSet.slice(0, 22)
+    const data = []
+    for (const f of R.fillRates) {
+      const ci = cols.indexOf(f.column)
+      const ti = tableNames.indexOf(f.table)
+      if (ci >= 0 && ti >= 0 && f.fillRate !== null) data.push([ci, ti, Math.round(f.fillRate * 1000) / 10])
+    }
+    if (!fillHeatmapEl.value) return
+    fillHeatmap?.dispose()
+    fillHeatmap = echarts.init(fillHeatmapEl.value)
+    fillHeatmap.setOption({
+      grid: { left: 8, right: 16, top: 12, bottom: 52, containLabel: true },
+      tooltip: {
+        position: 'top',
+        formatter: (p) => `${tableNames[p.value[1]]} · ${cols[p.value[0]]}：填充率 ${p.value[2]}%`,
+      },
+      xAxis: {
+        type: 'category', data: cols,
+        axisLabel: { color: '#475569', fontSize: 11.5, rotate: 30 },
+        axisLine: { show: false }, axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'category', data: tableNames,
+        axisLabel: { color: '#475569', fontSize: 12.5 },
+        axisLine: { show: false }, axisTick: { show: false },
+      },
+      visualMap: {
+        min: 0, max: 100, calculable: false, orient: 'horizontal',
+        left: 'center', bottom: 0, itemWidth: 12, itemHeight: 90,
+        textStyle: { color: '#64748b', fontSize: 11 },
+        inRange: { color: ['#ef4444', '#f59e0b', '#eab308', '#84cc16', '#22c55e'] },
+      },
+      series: [{
+        type: 'heatmap', data,
+        label: { show: true, fontSize: 10.5, color: '#334155', formatter: (p) => p.value[2] + '%' },
+        itemStyle: { borderColor: '#fff', borderWidth: 2, borderRadius: 3 },
+      }],
+    }, true)
+  }
+}
+
+function renderCorrChart() {
+  const c = analysisResult.value?.correlations.find((x) => x.table === corrTable.value)
+  if (!c || !corrHeatmapEl.value) return
+  const data = []
+  c.matrix.forEach((row, i) => row.forEach((v, j) => {
+    if (v !== null) data.push([i, j, v])
+  }))
+  corrHeatmap?.dispose()
+  corrHeatmap = echarts.init(corrHeatmapEl.value)
+  corrHeatmap.setOption({
+    grid: { left: 8, right: 16, top: 12, bottom: 52, containLabel: true },
+    tooltip: {
+      position: 'top',
+      formatter: (p) => `${c.columns[p.value[0]]} × ${c.columns[p.value[1]]}：r = ${p.value[2]}`,
+    },
+    xAxis: { type: 'category', data: c.columns, axisLabel: { color: '#475569', fontSize: 11.5, rotate: 30 }, axisLine: { show: false }, axisTick: { show: false } },
+    yAxis: { type: 'category', data: c.columns, axisLabel: { color: '#475569', fontSize: 11.5 }, axisLine: { show: false }, axisTick: { show: false } },
+    visualMap: {
+      min: -1, max: 1, calculable: false, orient: 'horizontal',
+      left: 'center', bottom: 0, itemWidth: 12, itemHeight: 90,
+      textStyle: { color: '#64748b', fontSize: 11 },
+      inRange: { color: ['#2563eb', '#93c5fd', '#f8fafc', '#fca5a5', '#dc2626'] },
+    },
+    series: [{
+      type: 'heatmap', data,
+      label: { show: true, fontSize: 10.5, color: '#334155', formatter: (p) => Number(p.value[2]).toFixed(2) },
+      itemStyle: { borderColor: '#fff', borderWidth: 2, borderRadius: 3 },
+    }],
+  }, true)
+}
 
 const editableColumns = computed(() => {
   return tableStructure.value.filter((col) =>
@@ -1152,6 +1528,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleChartResize)
   rowsChart?.dispose()
   sizeChart?.dispose()
+  disposeAnalysisCharts()
 })
 
 // ====================== 表列表 ======================
@@ -1209,6 +1586,12 @@ async function switchDb() {
       selectedDb.value = dbModalDb.value
       showDbModal.value = false
       selectedTable.value = ''
+      sqlView.value = false
+      analysisView.value = false
+      analysisResult.value = null
+      analysisSelected.value = []
+      fieldOptions.value = {}
+      selectedFields.value = {}
       sqlResult.value = null
       sqlError.value = ''
       fetchTables()
@@ -1243,6 +1626,7 @@ async function fetchTables() {
 
 function selectTable(name) {
   sqlView.value = false
+  analysisView.value = false
   if (!name) {
     selectedTable.value = ''
     sqlResult.value = null
@@ -1336,6 +1720,7 @@ function onSearchInput() {
 function openSqlView() {
   selectedTable.value = ''
   sqlView.value = true
+  analysisView.value = false
   sqlResult.value = null
   sqlError.value = ''
 }
@@ -2214,6 +2599,144 @@ function handleLogout() {
   padding: 0;
 }
 .chart-body { height: 300px; }
+.chart-body-tall { height: 340px; }
+
+/* ========== 数据分析 ========== */
+.analysis-picker {
+  background: #fff;
+  border-radius: 12px;
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.04);
+}
+.analysis-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 6px 0 12px;
+}
+.step-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.step-title { font-size: 14.5px; font-weight: 700; color: #1e293b; }
+.analysis-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.analysis-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 14px;
+  color: #334155;
+}
+.analysis-check:hover { border-color: #93c5fd; background: #f0f7ff; }
+.analysis-check.checked { background: #eff6ff; border-color: #2563eb; }
+.analysis-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin: 0;
+}
+.analysis-check-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis-check-count { margin-left: auto; font-size: 12.5px; color: #94a3b8; flex-shrink: 0; }
+.analysis-no-table { padding: 6px 0 2px; }
+.field-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.field-group {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fcfdff;
+}
+.field-group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.field-group-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #1e293b;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.field-group-link {
+  background: transparent;
+  border: none;
+  color: #2563eb;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+.field-group-link:hover { background: #eff6ff; }
+.field-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.field-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  font-size: 12.5px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.field-pill:hover { border-color: #60a5fa; color: #2563eb; }
+.field-pill.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.pill-pk {
+  font-size: 9.5px;
+  background: #fef3c7;
+  color: #b45309;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-weight: 700;
+}
+.field-pill.active .pill-pk { background: rgba(255, 255, 255, 0.25); color: #fff; }
+.analysis-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.analysis-block { margin-bottom: 16px; }
+.corr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.corr-select { min-width: 160px; }
 
 /* ========== 表视图 ========== */
 .table-view { animation: panelIn 0.2s ease; }
