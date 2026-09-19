@@ -20,7 +20,7 @@ export default defineConfig({
     ],
     ['meta', {
       'http-equiv': 'Content-Security-Policy',
-      content: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://api.wfbnm.xyz http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; img-src 'self' data: https:; font-src 'self' data:;"
+      content: "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://api.wfbnm.xyz http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; img-src 'self' data: blob: https:; font-src 'self' data:;"
     }],
   ],
   markdown: {
@@ -105,23 +105,17 @@ export default defineConfig({
         link: '/Tools/'
       },
       {
-        text: '日常问题',
+        text: '日常问题与文档研究',
         activeMatch: '/DailyProblem/',
         link: '/DailyProblem/'
       },
-      {
-        text: '文档研究',
-        activeMatch: '/DocumentResearch/',
-        link: '/DocumentResearch/'
-      }
     ],
     sidebar: {
       '/DailyProblem/': [
         {
-          text: '日常问题',
+          text: '日常问题与文档研究',
           items: [
-            { text: '前言', link: '/DailyProblem/' },
-            { text: '其他', link: '/DailyProblem/English' }]
+            { text: '内容', link: '/DailyProblem/' }]
         }
       ],
     },

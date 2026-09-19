@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 
-// 主轮番图（矢量插画，由 server/gen-art.mjs 生成）
+// 首屏：主轮番图（矢量插画，由 server/gen-art.mjs 生成）
 const slides = ref([
     { src: '/art/hero-1.svg', text: '多端数据库开发 · 跨平台数据管理与可视化' },
     { src: '/art/hero-2.svg', text: '数据库结构图 · 一键生成' },
@@ -20,51 +20,103 @@ const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
 const goTo = (i: number) => { current.value = i; startTimer(); };
 const prevSlide = () => { current.value = (current.value - 1 + slides.value.length) % slides.value.length; startTimer(); };
 const nextSlide = () => { current.value = (current.value + 1) % slides.value.length; startTimer(); };
-onMounted(() => {
-  // 主页导航悬浮：给 body 打标记（样式泄漏安全），离开主页即恢复
-  document.body.classList.add('dbm-home-active');
-  startTimer();
-});
-onBeforeUnmount(() => {
-  document.body.classList.remove('dbm-home-active');
-  stopTimer();
-});
 
-// 功能一览
+// 功能一览：滚动驱动，下滑依次展示各模块
 const features = ref([
     {
         title: '后端数据库管理控制台',
-        desc: '多平台数据库一站式管理：数据表增删改查、字段管理、SQL 编辑器（执行历史 + Ctrl+Enter 运行）、数据治理（质量检测 / 敏感字段识别 / 数据字典 / 审计日志）与多表整合数据分析图表。',
+        desc: '多平台数据库一站式管理，包括数据表增删改查、字段管理、SQL 编辑器、数据治理与数据分析等，后续功能开发中。',
         img: '/art/feature-console.svg',
         link: '/TaskLog/',
         linkText: '进入管理控制台（需登录）',
-        tags: ['MySQL', '数据治理', '统计图表'],
+        tags: ['数据分析', '数据治理', '统计图表'],
     },
     {
-        title: '数据库可视化工具',
-        desc: '免登录的轻量工具箱：连接 SQL Server 后一键生成数据库结构图，并可对表数据生成柱状图、折线图、饼图、散点图等统计图表，支持多表 JOIN 分析与图片 / SVG 导出，连接信息不会被存储。',
-        img: '/art/feature-viz.svg',
+        title: '便携式数据库管理工具',
+        desc: '连接 SQL Server 后选择数据库，一键生成实体关系结构图，直观看清表与表之间的关联，支持图片与 SVG 两种格式预览和下载，连接信息不会被存储。',
+        img: '/art/feature-diagram.svg',
         link: '/Tools/',
-        linkText: '立即使用（免登录）',
-        tags: ['SQL Server', '结构图', '统计图表', '免登录'],
+        linkText: '进入接库控制台（免登录）',
+        tags: ['便携式', 'ER 图','数据库架构' ],
     },
     {
-        title: '日常问题记录',
-        desc: '记录开发与运维过程中的常见问题、排查思路与解决方案，持续积累一线实战经验。',
+        title: '统计图表分析',
+        desc: '同一连接下选择表与字段，快速生成柱状图、折线图、饼图与散点图，支持单表聚合与多表 JOIN 分析，让数据规律一目了然。',
+        img: '/art/feature-charts.svg',
+        link: '/Tools/?tab=charts',
+        linkText: '打开图表分析（免登录）',
+        tags: ['ECharts', '多表 JOIN', '四种图表'],
+    },
+    {
+        title: '日常问题与文档研究',
+        desc: '记录开发与运维过程中的常见问题、排查思路与解决方案，技术文档的阅读笔记与研究心得，持续沉淀方法论与最佳实践。',
         img: '/art/feature-notes.svg',
         link: '/DailyProblem/',
-        linkText: '阅读记录',
-        tags: ['经验沉淀'],
-    },
-    {
-        title: '文档研究',
-        desc: '技术文档的阅读笔记与研究心得，沉淀方法论与最佳实践。',
-        img: '/art/feature-docs.svg',
-        link: '/DocumentResearch/',
         linkText: '开始阅读',
-        tags: ['技术笔记'],
+        tags: ['经验沉淀', '技术笔记'],
     },
 ]);
+const pinEl = ref<HTMLElement | null>(null);
+const scrollFeat = ref(0);
+const featDir = ref<'down' | 'up'>('down');
+
+const heroEl = ref<HTMLElement | null>(null);
+const stickyEl = ref<HTMLElement | null>(null);
+
+// 首屏轮番图与功能一览的交叉淡化：根据下滑幅度计算两者透明度
+function onHomeScroll() {
+    const mobile = window.innerWidth <= 600;
+    const vh = window.innerHeight;
+    const y = window.scrollY;
+    // 手机端：首屏轮番图隐藏，功能区直接展示，滚动仅切换模块
+    if (mobile) {
+        if (stickyEl.value) {
+            stickyEl.value.style.opacity = '1';
+            stickyEl.value.style.pointerEvents = 'auto';
+        }
+        if (heroEl.value) heroEl.value.style.opacity = '0';
+        const idx = Math.min(features.value.length - 1, Math.max(0, Math.floor(y / vh)));
+        if (idx !== scrollFeat.value) {
+            featDir.value = idx > scrollFeat.value ? 'down' : 'up';
+            scrollFeat.value = idx;
+        }
+        return;
+    }
+    const fadePx = vh * 0.8; // 前 80vh 滚动区间内完成交叉淡化
+    const fadeT = Math.min(1, Math.max(0, y / fadePx));
+    if (heroEl.value) {
+        heroEl.value.style.opacity = String(1 - fadeT);
+        heroEl.value.style.transform = `scale(${1 - 0.05 * fadeT})`;
+    }
+    if (stickyEl.value) {
+        stickyEl.value.style.opacity = String(fadeT);
+        stickyEl.value.style.pointerEvents = fadeT > 0.5 ? 'auto' : 'none';
+    }
+    // 淡化完成后再随滚动依次切换功能模块
+    const idx = Math.min(features.value.length - 1, Math.max(0, Math.floor(Math.max(0, y - fadePx) / vh)));
+    if (idx !== scrollFeat.value) {
+        featDir.value = idx > scrollFeat.value ? 'down' : 'up';
+        scrollFeat.value = idx;
+    }
+}
+// 手机端与桌面端的功能区滚动高度不同（手机端无首屏与交叉淡化段）
+function layoutFeaturePin() {
+    if (!pinEl.value) return;
+    pinEl.value.style.height = window.innerWidth <= 600
+        ? `${features.value.length * 100}vh`
+        : `calc(80vh + ${(features.value.length + 1) * 100}vh)`;
+}
+function scrollToFeat(i: number) {
+    const el = pinEl.value;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY + i * window.innerHeight;
+    window.scrollTo({ top, behavior: 'smooth' });
+}
+function scrollToFeatures() {
+    const el = pinEl.value;
+    if (!el) return;
+    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY, behavior: 'smooth' });
+}
 
 // 底部导航
 const footerNav = ref([
@@ -79,8 +131,7 @@ const footerNav = ref([
     {
         title: '文档资源',
         links: [
-            { text: '日常问题', href: '/DailyProblem/' },
-            { text: '文档研究', href: '/DocumentResearch/' },
+            { text: '日常问题与文档研究', href: '/DailyProblem/' },
         ],
     },
     {
@@ -91,52 +142,96 @@ const footerNav = ref([
         ],
     },
 ]);
+
+// 视口变化：重算功能区滚动高度并刷新状态
+function onViewportResize() {
+    layoutFeaturePin();
+    onHomeScroll();
+}
+onMounted(() => {
+  // 主页导航悬浮：给 body 打标记（样式泄漏安全），离开主页即恢复
+  document.body.classList.add('dbm-home-active');
+  startTimer();
+  layoutFeaturePin();
+  onHomeScroll();
+  window.addEventListener('scroll', onHomeScroll, { passive: true });
+  window.addEventListener('resize', onViewportResize);
+});
+onBeforeUnmount(() => {
+  document.body.classList.remove('dbm-home-active');
+  stopTimer();
+  window.removeEventListener('scroll', onHomeScroll);
+  window.removeEventListener('resize', onViewportResize);
+});
 </script>
 
 <template>
     <div class="home-page">
-        <!-- 主轮番图 -->
-        <section class="hero-carousel" aria-label="站点轮播展示" @mouseenter="stopTimer" @mouseleave="startTimer">
-            <div class="carousel-track" :style="{ transform: `translateX(-${current * 100}%)` }">
-                <div class="carousel-slide" v-for="(s, i) in slides" :key="i">
-                    <img :src="s.src" :alt="s.text" :loading="i === 0 ? 'eager' : 'lazy'" />
-                    <div class="carousel-caption">{{ s.text }}</div>
-                </div>
-            </div>
-            <button class="carousel-arrow prev" aria-label="上一张" @click="prevSlide">‹</button>
-            <button class="carousel-arrow next" aria-label="下一张" @click="nextSlide">›</button>
-            <div class="carousel-dots">
-                <button
-                    v-for="(s, i) in slides"
-                    :key="i"
-                    class="dot"
-                    :class="{ active: current === i }"
-                    :aria-label="`第 ${i + 1} 张`"
-                    @click="goTo(i)"
-                ></button>
-            </div>
-        </section>
-
-        <!-- 功能一览 -->
-        <section class="features">
-            <h2 class="section-title">功能一览</h2>
-            <p class="section-subtitle">站内全部能力，按模块分别介绍</p>
-            <div
-                v-for="(f, i) in features"
-                :key="f.title"
-                class="feature-row"
-                :class="{ reverse: i % 2 === 1 }"
-            >
-                <div class="feature-img">
-                    <img :src="f.img" :alt="`${f.title} 示例图`" loading="lazy" />
-                </div>
-                <div class="feature-text">
-                    <div class="feature-tags">
-                        <span v-for="t in f.tags" :key="t" class="tag">{{ t }}</span>
+        <!-- 首屏：主轮番图（下滑 80vh 内与功能区交叉淡化） -->
+        <div class="hero-pin">
+            <section class="hero-section" ref="heroEl">
+            <div class="hero-carousel" aria-label="站点轮播展示" @mouseenter="stopTimer" @mouseleave="startTimer">
+                <div class="carousel-track" :style="{ transform: `translateX(-${current * 100}%)` }">
+                    <div class="carousel-slide" v-for="(s, i) in slides" :key="i">
+                        <img :src="s.src" :alt="s.text" :loading="i === 0 ? 'eager' : 'lazy'" />
+                        <div class="carousel-caption">{{ s.text }}</div>
                     </div>
-                    <h3>{{ f.title }}</h3>
-                    <p>{{ f.desc }}</p>
-                    <a class="feature-link" :href="f.link">{{ f.linkText }} →</a>
+                </div>
+                <button class="carousel-arrow prev" aria-label="上一张" @click="prevSlide">‹</button>
+                <button class="carousel-arrow next" aria-label="下一张" @click="nextSlide">›</button>
+                <div class="carousel-dots">
+                    <button
+                        v-for="(s, i) in slides"
+                        :key="i"
+                        class="dot"
+                        :class="{ active: current === i }"
+                        :aria-label="`第 ${i + 1} 张`"
+                        @click="goTo(i)"
+                    ></button>
+                </div>
+            </div>
+            <button class="scroll-hint" aria-label="向下滚动查看功能" @click="scrollToFeatures">
+                <span>向下滑动 · 探索站内功能</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"/>
+                </svg>
+            </button>
+            </section>
+        </div>
+
+        <!-- 功能一览：滚动逐项展示（前 80vh 与首屏交叉淡化） -->
+        <section class="features-pin" ref="pinEl" :style="{ height: `calc(80vh + ${(features.length + 1) * 100}vh)` }">
+            <div class="features-sticky" ref="stickyEl">
+                <div class="features-head">
+                    <p class="features-eyebrow">FEATURES</p>
+                    <h2 class="section-title">功能一览</h2>
+                </div>
+                <div class="feature-stage">
+                    <Transition :name="featDir === 'down' ? 'feat-down' : 'feat-up'" mode="out-in">
+                        <div :key="scrollFeat" class="feature-row" :class="{ reverse: scrollFeat % 2 === 1 }">
+                            <div class="feature-img">
+                                <img :src="features[scrollFeat].img" :alt="`${features[scrollFeat].title} 示例图`" />
+                            </div>
+                            <div class="feature-text">
+                                <div class="feature-tags">
+                                    <span v-for="t in features[scrollFeat].tags" :key="t" class="tag">{{ t }}</span>
+                                </div>
+                                <h3>{{ features[scrollFeat].title }}</h3>
+                                <p>{{ features[scrollFeat].desc }}</p>
+                                <a class="feature-link" :href="features[scrollFeat].link">{{ features[scrollFeat].linkText }} →</a>
+                            </div>
+                        </div>
+                    </Transition>
+                </div>
+                <div class="feat-progress" aria-label="功能进度">
+                    <button
+                        v-for="(f, i) in features"
+                        :key="f.title"
+                        class="feat-dot"
+                        :class="{ active: scrollFeat === i }"
+                        :aria-label="f.title"
+                        @click="scrollToFeat(i)"
+                    ></button>
                 </div>
             </div>
         </section>
@@ -161,22 +256,84 @@ const footerNav = ref([
 </template>
 
 <style lang="css" scoped>
-/* 主页整体：深灰底色（与轮番图、控制台风格协调），白字 */
+/* ========== 主页配色变量：亮色模式淡蓝底 / 暗色模式深灰底（跟随主题切换） ========== */
 :global(body.dbm-home-active) {
-    background-color: #12161f !important;
-    background-image: radial-gradient(1400px 800px at 50% -10%, #1c2433 0%, #141926 55%, #111521 100%) !important;
+    --hp-bg: radial-gradient(1400px 800px at 50% -10%, #eaf3ff 0%, #dcebfd 48%, #d7e8fb 100%) #e3eefc;
+    --hp-nav-bg: rgba(255, 255, 255, 0.62);
+    --hp-nav-border: rgba(59, 130, 246, 0.22);
+    --hp-nav-shadow: 0 10px 30px rgba(30, 64, 175, 0.10);
+    --hp-nav-title: #17324d;
+    --hp-nav-link: #3d5a80;
+    --hp-nav-link-active: #2563eb;
+    --hp-nav-pill: rgba(255, 255, 255, 0.75);
+    --hp-nav-pill-border: rgba(59, 130, 246, 0.3);
+    --hp-nav-pill-text: #6b83a3;
+    --hp-icon: #3d5a80;
+    --hp-title: #14304d;
+    --hp-text: #46608a;
+    --hp-muted: #5b7292;
+    --hp-line: rgba(37, 99, 235, 0.14);
+    --hp-card-bg: rgba(255, 255, 255, 0.62);
+    --hp-card-bg-hover: rgba(255, 255, 255, 0.92);
+    --hp-card-border: rgba(59, 130, 246, 0.22);
+    --hp-card-hover-border: rgba(37, 99, 235, 0.55);
+    --hp-card-shadow: 0 18px 44px rgba(30, 64, 175, 0.22);
+    --hp-img-shadow: 0 14px 34px rgba(30, 64, 175, 0.20);
+    --hp-carousel-shadow: 0 12px 34px rgba(30, 64, 175, 0.18);
+    --hp-accent: #2563eb;
+    --hp-accent-2: #0891b2;
+    --hp-accent-solid: #2563eb;
+    --hp-tag-text: #1d4ed8;
+    --hp-tag-bg: rgba(37, 99, 235, 0.08);
+    --hp-tag-border: rgba(37, 99, 235, 0.24);
+    --hp-panel-bg: rgba(255, 255, 255, 0.55);
+    --hp-font-serif: 'Times New Roman', 'SimSun', '宋体', serif;
+    background: var(--hp-bg) !important;
 }
-/* 主页导航悬浮：仅在 body 带主页标记时生效（样式泄漏安全），离开主页即恢复常规导航 */
+:global(html.dark body.dbm-home-active) {
+    --hp-bg: radial-gradient(1400px 800px at 50% -10%, #1c2433 0%, #141926 55%, #111521 100%) #12161f;
+    --hp-nav-bg: rgba(15, 23, 42, 0.72);
+    --hp-nav-border: rgba(71, 85, 105, 0.45);
+    --hp-nav-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --hp-nav-title: #f1f5f9;
+    --hp-nav-link: #cbd5e1;
+    --hp-nav-link-active: #7db2ff;
+    --hp-nav-pill: rgba(30, 41, 59, 0.7);
+    --hp-nav-pill-border: rgba(71, 85, 105, 0.5);
+    --hp-nav-pill-text: #7c8aa0;
+    --hp-icon: #cbd5e1;
+    --hp-title: #f1f5f9;
+    --hp-text: #b7c2d4;
+    --hp-muted: #8fa1b8;
+    --hp-line: rgba(255, 255, 255, 0.08);
+    --hp-card-bg: rgba(255, 255, 255, 0.035);
+    --hp-card-bg-hover: rgba(255, 255, 255, 0.06);
+    --hp-card-border: rgba(255, 255, 255, 0.08);
+    --hp-card-hover-border: rgba(96, 165, 250, 0.45);
+    --hp-card-shadow: 0 16px 38px rgba(0, 0, 0, 0.35);
+    --hp-img-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    --hp-carousel-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+    --hp-accent: #7db2ff;
+    --hp-accent-2: #67e8f9;
+    --hp-accent-solid: #3b82f6;
+    --hp-tag-text: #93c5fd;
+    --hp-tag-bg: rgba(59, 130, 246, 0.16);
+    --hp-tag-border: rgba(96, 165, 250, 0.35);
+    --hp-panel-bg: rgba(255, 255, 255, 0.03);
+}
+/* 主页导航悬浮胶囊：固定定位，真正悬浮于内容之上 */
 :global(body.dbm-home-active .VPNavBar) {
+    position: fixed !important;
     top: 14px !important;
     left: 16px !important;
     right: 16px !important;
     border-radius: 16px;
-    background: rgba(15, 23, 42, 0.72) !important;
+    background: var(--hp-nav-bg) !important;
     -webkit-backdrop-filter: blur(16px) saturate(1.5);
     backdrop-filter: blur(16px) saturate(1.5);
-    border: 1px solid rgba(71, 85, 105, 0.45);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    border: 1px solid var(--hp-nav-border);
+    box-shadow: var(--hp-nav-shadow);
+    font-family: 'Times New Roman', 'SimSun', '宋体', serif;
     overflow: hidden;
     transition: background 0.3s ease;
 }
@@ -193,51 +350,73 @@ const footerNav = ref([
 :global(body.dbm-home-active .VPFooter) {
     display: none !important;
 }
-/* 深色胶囊上的导航文字提亮 */
+/* 导航文字：亮色模式深蓝字 / 暗色模式浅字 */
 :global(body.dbm-home-active .VPNavBarTitle .title),
 :global(body.dbm-home-active .VPNavBarTitle .text) {
-    color: #f1f5f9 !important;
+    color: var(--hp-nav-title) !important;
 }
 :global(body.dbm-home-active .VPNavBarMenuLink) {
-    color: #cbd5e1 !important;
+    color: var(--hp-nav-link) !important;
 }
 :global(body.dbm-home-active .VPNavBarMenuLink.active),
 :global(body.dbm-home-active .VPNavBarMenuLink:hover) {
-    color: #7db2ff !important;
+    color: var(--hp-nav-link-active) !important;
 }
 :global(body.dbm-home-active .VPNavBarSearch .DocSearch-Button) {
-    background: rgba(30, 41, 59, 0.7) !important;
-    border-color: rgba(71, 85, 105, 0.5) !important;
+    background: var(--hp-nav-pill) !important;
+    border-color: var(--hp-nav-pill-border) !important;
 }
 :global(body.dbm-home-active .VPNavBarSearch .DocSearch-Button-Placeholder),
 :global(body.dbm-home-active .VPNavBarSearch .DocSearch-Button-Key) {
-    color: #7c8aa0 !important;
+    color: var(--hp-nav-pill-text) !important;
     background: transparent !important;
-    border-color: rgba(71, 85, 105, 0.5) !important;
+    border-color: var(--hp-nav-pill-border) !important;
 }
 :global(body.dbm-home-active .VPSwitch) {
-    background: rgba(30, 41, 59, 0.7) !important;
-    border-color: rgba(71, 85, 105, 0.5) !important;
+    background: var(--hp-nav-pill) !important;
+    border-color: var(--hp-nav-pill-border) !important;
 }
 :global(body.dbm-home-active .VPSwitch .icon),
 :global(body.dbm-home-active .VPSocialLink) {
-    color: #cbd5e1 !important;
+    color: var(--hp-icon) !important;
 }
 
 .home-page {
-    width: calc(100% - 32px);
-    margin: 0 auto;
-    padding: 16px 0 40px;
+    width: 100%;
+    padding: 0;
+    /* 统一字体：中文宋体、英文 Times New Roman */
+    font-family: 'Times New Roman', 'SimSun', '宋体', serif;
+
+    /* 字号体系（按角色统一） */
+    --hp-fs-display: 26px;
+    --hp-fs-h3: 26px;
+    --hp-fs-desc: 18px;
+    --hp-fs-ui: 17px;
+    --hp-fs-tag: 15px;
+    --hp-fs-small: 14px;
+    --hp-fs-link: 15.5px;
+    --hp-fs-grouph: 17px;
 }
 
-/* ========== 主轮番图 ========== */
+/* ========== 首屏轮番图 ========== */
+/* 首屏钉住层：轮番图在前 80vh 滚动区间内固定，随后被功能区覆盖 */
+.hero-pin {
+    position: relative;
+    height: calc(100vh + 80vh);
+}
+.hero-section {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100svh;
+    min-height: 540px;
+    will-change: opacity, transform;
+}
 .hero-carousel {
     position: relative;
-    border-radius: 16px;
+    height: 100%;
     overflow: hidden;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
-    aspect-ratio: 21 / 9;
-    background: var(--vp-c-bg-soft, #f1f5f9);
+    background: #0f172a;
 }
 .carousel-track {
     display: flex;
@@ -260,21 +439,21 @@ const footerNav = ref([
     left: 0;
     right: 0;
     bottom: 0;
-    padding: 40px 28px 16px;
+    padding: 46px 28px 24px 48px;
     background: linear-gradient(transparent, rgba(0, 0, 0, 0.62));
     color: #fff;
     font-size: 18px;
     font-weight: 600;
     letter-spacing: 0.5px;
-    text-align: center;
+    text-align: left;
     text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 .carousel-arrow {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 40px;
-    height: 40px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
     border: none;
     background: rgba(0, 0, 0, 0.35);
@@ -289,12 +468,12 @@ const footerNav = ref([
     backdrop-filter: blur(4px);
 }
 .carousel-arrow:hover { background: rgba(0, 0, 0, 0.55); }
-.carousel-arrow.prev { left: 14px; }
-.carousel-arrow.next { right: 14px; }
+.carousel-arrow.prev { left: 22px; }
+.carousel-arrow.next { right: 22px; }
 .carousel-dots {
     position: absolute;
-    bottom: 12px;
-    right: 18px;
+    bottom: 24px;
+    right: 26px;
     display: flex;
     gap: 8px;
 }
@@ -310,35 +489,102 @@ const footerNav = ref([
 }
 .dot.active { background: #fff; width: 22px; border-radius: 5px; }
 
-/* ========== 功能一览 ========== */
-.features { margin-top: 48px; }
+/* 下滑提示 */
+.scroll-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-size: 14px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+    z-index: 5;
+}
+.scroll-hint svg {
+    width: 22px;
+    height: 22px;
+    animation: hintBounce 1.8s ease-in-out infinite;
+}
+@keyframes hintBounce {
+    0%, 100% { transform: translateY(0); opacity: 0.9; }
+    50% { transform: translateY(7px); opacity: 0.5; }
+}
+
+/* ========== 功能一览：滚动钉住逐项展示 ========== */
+.features-pin {
+    position: relative;
+    margin-top: -100vh; /* 与首屏钉住层重叠，交叉淡化 */
+    /* 实际高度由模板 :style 按功能数量设置 */
+}
+.features-sticky {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100svh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 92px 32px 28px;
+    box-sizing: border-box;
+    overflow: hidden;
+    opacity: 0; /* 初始透明，滚动幅度驱动淡入（JS 设置） */
+    pointer-events: none;
+}
+/* 标题区固定高度：翻转切换时不跳动，位置在导航下方居中偏上 */
+.features-head {
+    text-align: center;
+    height: 74px;
+    flex-shrink: 0;
+}
+.features-eyebrow {
+    font-size: var(--hp-fs-small);
+    letter-spacing: 4px;
+    color: var(--hp-accent-2);
+    margin: 0 0 8px;
+}
 .section-title {
     text-align: center;
-    font-size: 28px;
+    font-size: var(--hp-fs-display);
     font-weight: 700;
-    color: #f1f5f9;
-    margin: 0 0 6px;
+    letter-spacing: 1px;
+    margin: 0;
+    background: linear-gradient(95deg, var(--hp-accent) 25%, var(--hp-accent-2) 80%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
 }
-.section-subtitle {
-    text-align: center;
-    font-size: 15.5px;
-    color: #8fa1b8;
-    margin: 0 0 36px;
+/* 功能内容舞台：占满标题以下全部空间，切换时尺寸稳定 */
+.feature-stage {
+    position: relative;
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 .feature-row {
     display: grid;
-    grid-template-columns: 1.05fr 1fr;
-    gap: 40px;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 52px;
     align-items: stretch;
-    padding: 34px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    width: min(1560px, calc(100% - 48px));
 }
 .feature-row.reverse .feature-img { order: 2; }
 .feature-row.reverse .feature-text { order: 1; }
 .feature-img {
     border-radius: 14px;
     overflow: hidden;
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--hp-img-shadow);
     aspect-ratio: 16 / 10;
 }
 .feature-img img {
@@ -346,127 +592,190 @@ const footerNav = ref([
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform 0.35s ease;
 }
-.feature-row:hover .feature-img img { transform: scale(1.04); }
 .feature-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .tag {
-    font-size: 13.5px;
+    font-size: var(--hp-fs-tag);
     font-weight: 600;
-    padding: 3px 14px;
+    padding: 4px 16px;
     border-radius: 999px;
-    color: #93c5fd;
-    background: rgba(59, 130, 246, 0.16);
-    border: 1px solid rgba(96, 165, 250, 0.35);
+    color: var(--hp-tag-text);
+    background: var(--hp-tag-bg);
+    border: 1px solid var(--hp-tag-border);
 }
-/* 功能描述：悬浮玻璃卡片，悬停上浮 */
+/* 功能描述 + 入口：无边框悬浮文字块，悬停上浮 */
 .feature-text {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 18px;
-    padding: 32px 36px;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    padding: 0 12px;
     box-sizing: border-box;
-    transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+    transition: transform 0.3s ease;
 }
 .feature-row:hover .feature-text {
-    transform: translateY(-5px);
-    border-color: rgba(96, 165, 250, 0.45);
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.35);
+    transform: translateY(-8px);
 }
 .feature-text h3 {
-    font-size: 25px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: var(--hp-fs-h3);
     font-weight: 700;
-    color: #f1f5f9;
-    margin: 0 0 14px;
+    color: var(--hp-title);
+    margin: 0 0 16px;
+}
+.feature-text h3::before {
+    content: '';
+    width: 7px;
+    height: 27px;
+    border-radius: 4px;
+    background: linear-gradient(180deg, var(--hp-accent), var(--hp-accent-2));
+    flex-shrink: 0;
 }
 .feature-text p {
-    font-size: 17.5px;
-    line-height: 1.9;
-    color: #b7c2d4;
-    margin: 0 0 22px;
+    font-size: var(--hp-fs-desc);
+    line-height: 1.95;
+    color: var(--hp-text);
+    margin: 0 0 26px;
 }
 .feature-link {
     align-self: flex-start;
     display: inline-block;
-    padding: 11px 26px;
-    border-radius: 10px;
-    font-size: 16px;
+    padding: 12px 30px;
+    border-radius: 12px;
+    font-size: var(--hp-fs-ui);
     font-weight: 600;
     text-decoration: none;
-    color: #7db2ff;
-    border: 1px solid #3b82f6;
+    color: var(--hp-accent);
+    border: 1px solid var(--hp-accent);
     transition: all 0.2s;
 }
 .feature-link:hover {
     color: #fff;
-    background: #3b82f6;
+    background: var(--hp-accent-solid);
     transform: translateY(-1px);
-    box-shadow: 0 8px 18px rgba(59, 130, 246, 0.35);
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.35);
 }
+
+/* 进度点（右侧竖排） */
+.feat-progress {
+    position: absolute;
+    right: 26px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.feat-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    border: none;
+    padding: 0;
+    background: var(--hp-line);
+    cursor: pointer;
+    transition: all 0.25s;
+}
+.feat-dot.active { background: var(--hp-accent); height: 24px; border-radius: 5px; }
+.feat-counter {
+    font-size: var(--hp-fs-small);
+    color: var(--hp-muted);
+}
+
+/* 切换动画：随滚动方向上滑 / 下滑淡入淡出 */
+.feat-down-enter-active, .feat-down-leave-active,
+.feat-up-enter-active, .feat-up-leave-active {
+    transition: opacity 0.3s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.feat-down-enter-from { opacity: 0; transform: translateY(70px); }
+.feat-down-leave-to { opacity: 0; transform: translateY(-70px); }
+.feat-up-enter-from { opacity: 0; transform: translateY(-70px); }
+.feat-up-leave-to { opacity: 0; transform: translateY(70px); }
 
 /* ========== 底部导航 ========== */
 .home-footer-nav {
-    margin-top: 48px;
-    padding: 32px 28px 22px;
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    width: 100%;
+    margin: 48px 0 0;
+    padding: 34px 48px 22px;
+    border-radius: 0;
+    background: var(--hp-panel-bg);
+    border-top: 1px solid var(--hp-line);
+    box-sizing: border-box;
 }
 .footer-cols {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 24px;
+    max-width: 1560px;
+    margin: 0 auto;
 }
 .footer-col h4 {
-    font-size: 15px;
+    font-size: var(--hp-fs-grouph);
     font-weight: 700;
-    color: #f1f5f9;
+    letter-spacing: 1px;
+    color: var(--hp-title);
     margin: 0 0 12px;
 }
 .footer-col a {
     display: block;
-    font-size: 14.5px;
-    color: #9aa7ba;
+    font-size: var(--hp-fs-link);
+    color: var(--hp-muted);
     text-decoration: none;
     padding: 5px 0;
     transition: color 0.15s;
 }
-.footer-col a:hover { color: #7db2ff; }
+.footer-col a:hover { color: var(--hp-accent); }
 .footer-note {
     margin: 26px 0 0;
     padding-top: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid var(--hp-line);
     text-align: center;
-    font-size: 13.5px;
-    color: #64748b;
+    font-size: var(--hp-fs-small);
+    letter-spacing: 1px;
+    color: var(--hp-muted);
 }
 
 /* ========== 响应式 ========== */
 @media (max-width: 820px) {
+    .features-sticky {
+        padding: 74px 20px 24px;
+    }
+    .features-head { height: 60px; }
     .feature-row {
         grid-template-columns: 1fr;
-        gap: 18px;
-        padding: 24px 0;
+        gap: 16px;
+        width: calc(100% - 32px);
     }
     .feature-row.reverse .feature-img { order: 0; }
-    .hero-carousel { aspect-ratio: 16 / 9; }
-    .carousel-caption { font-size: 15px; }
-    .section-title { font-size: 24px; }
+    .feature-img { aspect-ratio: auto; }
+    .feature-img img { height: 30vh; }
+    .section-title { font-size: 20px; }
+    .feat-progress { right: 10px; }
+    /* 字幕上移，底部留出下滑提示条空间，避免重叠 */
+    .carousel-caption { font-size: 15px; padding: 40px 20px 48px 24px; }
+    .scroll-hint { bottom: 12px; }
+    .carousel-dots { bottom: 18px; right: 14px; }
+    .carousel-arrow.prev { left: 10px; }
+    .carousel-arrow.next { right: 10px; }
+    .home-footer-nav { padding: 28px 24px 18px; margin-top: 40px; }
+    .footer-cols { gap: 20px; }
 }
 @media (max-width: 600px) {
-    .home-page { width: calc(100% - 20px); }
-    .feature-text { padding: 24px 22px; border-radius: 14px; }
+    .hero-section { min-height: 480px; }
+    .carousel-caption { font-size: 14.5px; padding-bottom: 44px; }
+    .scroll-hint span { display: none; }
+    .scroll-hint { bottom: 10px; }
+    .carousel-dots { bottom: 14px; right: 12px; }
+    .features-eyebrow { letter-spacing: 3px; }
+    .feature-text { padding: 0 6px; }
     .feature-text h3 { font-size: 22px; }
-    .feature-text p { font-size: 16px; }
-    .section-title { font-size: 24px; }
-    .section-subtitle { font-size: 14px; }
-    .home-footer-nav { padding: 24px 18px 16px; }
+    .feature-text p { font-size: 17px; }
+    .home-footer-nav { padding: 24px 20px 14px; margin-top: 32px; }
+    .footer-cols { gap: 16px; }
+    /* 手机端隐藏首屏轮番图，功能区直接成为首屏 */
+    .hero-pin { display: none; }
+    .features-pin { margin-top: 0; }
     :global(body.dbm-home-active .VPNavBar) {
         top: 10px !important;
         left: 10px !important;

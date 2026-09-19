@@ -1,10 +1,8 @@
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue';
-import { useRoute } from 'vitepress';
 import SqlServerDiagramPanel from '../.vitepress/components/SqlServerDiagramPanel.vue';
 import DataVizPage from '../DataVisualization/index.vue';
 
-const route = useRoute();
 const activeTab = ref<'diagram' | 'charts'>('diagram');
 const chartsMounted = ref(false);
 
@@ -14,7 +12,8 @@ function switchTab(tab: 'diagram' | 'charts') {
 }
 
 onMounted(() => {
-    if (route.query.tab === 'charts') switchTab('charts');
+    // 从 URL 查询参数读取初始标签（?tab=charts），兼容旧“图表分析”入口链接
+    if (new URLSearchParams(window.location.search).get('tab') === 'charts') switchTab('charts');
 });
 </script>
 

@@ -271,7 +271,7 @@ const featureDocs = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height
   </g>
 </svg>`;
 
-// 2. 可视化工具（合并版：结构图 + 图表）
+// 4. 可视化工具（合并版：结构图 + 图表）
 const featureViz = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="750" viewBox="0 0 1200 750">
   ${featureBg('#dbeafe')}
   <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/></marker></defs>
@@ -310,15 +310,11 @@ const featureViz = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height=
 
 const features = [
     { name: 'feature-console', svg: featureConsole },
-    { name: 'feature-viz', svg: featureViz },
+    { name: 'feature-diagram', svg: featureDiagram },
+    { name: 'feature-charts', svg: featureCharts },
     { name: 'feature-notes', svg: featureNotes },
     { name: 'feature-docs', svg: featureDocs },
 ];
 features.forEach((f) => writeFileSync(resolve(OUT, `${f.name}.svg`), f.svg));
-
-// 清理旧素材
-for (const old of ['feature-diagram.svg', 'feature-charts.svg']) {
-  try { unlinkSync(resolve(OUT, old)); } catch {}
-}
 
 console.log(`已生成 ${heroes.length} 张轮番横幅 + ${features.length} 张功能插画 → ${OUT}`);
