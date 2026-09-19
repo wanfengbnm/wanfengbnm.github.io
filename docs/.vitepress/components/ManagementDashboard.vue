@@ -1360,6 +1360,7 @@ async function runAnalysis() {
       corrTable.value = data.correlations[0]?.table || ''
       await nextTick()
       renderAnalysisCharts()
+      renderCorrChart()
     } else {
       alert(data.message || `分析失败（${res.status}）`)
     }
